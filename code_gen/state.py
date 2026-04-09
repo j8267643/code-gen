@@ -1,5 +1,5 @@
 """
-State management for Claude Code
+State management for Code Gen
 Based on AppStateStore.ts from TypeScript project
 """
 from dataclasses import dataclass, field
@@ -72,7 +72,7 @@ class AppStateStore:
     """Application state store"""
     
     def __init__(self, config_dir: Path = None):
-        self.config_dir = config_dir or Path.home() / ".config" / "claude-code"
+        self.config_dir = config_dir or Path.home() / ".config" / "code-gen"
         self.state = AppState()
         self._listeners: list[Callable[[AppState], None]] = []
         self._lock = threading.Lock()

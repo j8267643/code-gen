@@ -28,12 +28,12 @@ from code_gen.cost_tracker import CostTracker
 from code_gen.history import HistorySystem
 
 # Import new integration module
-from code_gen.integration import ClaudeCodeIntegration, integration_instance
+from code_gen.integration import CodeGenIntegration, integration_instance
 
 console = Console()
 
 
-class ClaudeCodeApp:
+class CodeGenApp:
     """Main terminal UI application"""
     
     def __init__(self, session: SessionManager):
@@ -125,7 +125,7 @@ class ClaudeCodeApp:
         if integration_instance is None:
             from pathlib import Path
             work_dir = Path.cwd()
-            integration_instance = ClaudeCodeIntegration(work_dir)
+            integration_instance = CodeGenIntegration(work_dir)
     
     def _init_cost_tracker(self):
         """Initialize cost tracker"""
@@ -210,6 +210,20 @@ use the write_file tool to save it to a memory file."""
             
             console.print("[dim]Type 'exit' or press Ctrl+C to quit[/dim]\n")
             
+            console.print("\n")
+            # CODEGEN ASCII Art
+            console.print(r"[bold cyan]╔══════════════════════════════════════════════════════════════╗[/bold cyan]")
+            console.print(r"[bold cyan]║  ██████╗ ██████╗ ██████╗ ███████╗ ██████╗ ███████╗ ███╗   ██╗║[/bold cyan]")
+            console.print(r"[bold cyan]║ ██╔════╝██╔═████╗██╔══██╗██╔════╝██╔════╝ ██╔════╝ ████╗  ██║║[/bold cyan]")
+            console.print(r"[bold cyan]║ ██║     ██║██╔██║██║  ██║█████╗  ██║█████╗█████╗   ██╔██╗ ██║║[/bold cyan]")
+            console.print(r"[bold cyan]║ ██║     ████╔╝██║██║  ██║██╔══╝  ██╚═══██║██╔══╝   ██║╚██╗██║║[/bold cyan]")
+            console.print(r"[bold cyan]║ ╚██████╗╚██████╔╝██████╔╝███████╗╚██████╔╝███████╗ ██║ ╚████║║[/bold cyan]")
+            console.print(r"[bold cyan]║  ╚═════╝ ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝ ╚══════╝ ╚═╝  ╚═══╝║[/bold cyan]")
+            console.print(r"[bold cyan]╚══════════════════════════════════════════════════════════════╝[/bold cyan]")
+            console.print(r"[bold cyan]              C O D E G E N                       [/bold cyan]")
+            console.print(r"[dim]              AI Programming Assistant            [/dim]")
+            console.print("\n")
+            
             while self.running:
                 try:
                     # Get user input
@@ -268,7 +282,7 @@ use the write_file tool to save it to a memory file."""
         """Process user message with Claude"""
         try:
             # Show processing status
-            console.print("\n[dim]Claude Code is thinking...[/dim]")
+            console.print("\n[dim]CodeGen is thinking...[/dim]")
             
             # Add user message to session
             self.session.add_message("user", user_input)
@@ -507,255 +521,108 @@ use the write_file tool to save it to a memory file."""
         return f"Tool not found: {tool_name}"
     
     def _handle_command(self, command: str):
-        """Handle special slash commands"""
+        """Handle special commands"""
         parts = command.split()
         cmd = parts[0].lower()
-        args = parts[1:]
         
-        if cmd == '/clear':
+        if cmd == '/help':
+            console.print("[bold cyan]Available Commands:[/bold cyan]")
+            console.print("  /help - Show this help message")
+            console.print("  /clear - Clear the screen")
+            console.print("  /save - Save conversation")
+            console.print("  /load - Load conversation")
+            console.print("  /reset - Reset session")
+            console.print("  /tools - List available tools")
+            console.print("  /skills - List available skills")
+            console.print("  /cost - Show cost information")
+            console.print("  /history - Show conversation history")
+            console.print("  /dream - Run dreaming process")
+            console.print("  /security - Show security status")
+            console.print("  /exit - Exit the application")
+        elif cmd == '/clear':
             console.clear()
-            self.session.clear()
-            console.print("[dim]Session cleared[/dim]")
-            
-        elif cmd == '/new':
-            # Create a new session with a fresh ID
-            console.print("[bold]Creating new session...[/bold]")
-            from pathlib import Path
-            from code_gen.session import SessionManager
-            from datetime import datetime
-            
-            # Save current session before creating new one
-            self.session._save_session()
-            
-            # Create a new session with timestamp-based ID to force fresh start
-            current_time = datetime.now().strftime('%Y%m%d_%H%M%S')
-            new_session_id = f"{self.session.work_dir.name}_session_{current_time}"
-            
-            # Create new session manually
-            from code_gen.session import Session
-            new_session = Session(
-                id=new_session_id,
-                work_dir=self.session.work_dir,
-                model=self.session.model
-            )
-            
-            # Create new session manager
-            new_sm = SessionManager.__new__(SessionManager)
-            new_sm.work_dir = self.session.work_dir
-            new_sm.model = self.session.model
-            new_sm.session = new_session
-            
-            self.session = new_sm
-            
-            console.print("[green]New session created![/green]")
-            console.print(f"[dim]Session ID: {new_session.id}[/dim]")
-            console.print(f"[dim]Messages: {len(new_session.messages)}[/dim]")
-            
-        elif cmd == '/files':
-            # Show context files
-            files = self.session.session.context_files
-            if files:
-                console.print("[bold]Context files:[/bold]")
-                for f in files:
-                    console.print(f"  • {f}")
-            else:
-                console.print("[dim]No context files[/dim]")
-                
-        elif cmd == '/help':
-            self._show_help()
-            
+        elif cmd == '/tools':
+            console.print("[bold cyan]Available Tools:[/bold cyan]")
+            for tool in self.tools:
+                console.print(f"  - {tool.name}: {tool.description}")
         elif cmd == '/skills':
-            # Show available skills
-            console.print("[bold]Available Skills:[/bold]")
             if self.skill_system:
+                console.print("[bold cyan]Available Skills:[/bold cyan]")
                 for skill in self.skill_system.skills.values():
-                    console.print(f"  • {skill.name}: {skill.description}")
-                    if skill.patterns:
-                        console.print(f"    Patterns: {', '.join(skill.patterns)}")
-                    if skill.commands:
-                        console.print(f"    Commands: {', '.join(skill.commands)}")
+                    console.print(f"  - {skill.name}: {skill.description}")
             else:
-                console.print("[dim]No skills loaded[/dim]")
-                    
-        elif cmd == '/mcp':
-            # Show MCP status
-            console.print("[bold]MCP Status:[/bold]")
-            if mcp_manager.clients:
-                for server_name, client in mcp_manager.clients.items():
-                    console.print(f"  • {server_name}: {'Connected' if client.connected else 'Disconnected'}")
-                    tools = mcp_manager.get_all_tools()
-                    if tools:
-                        console.print(f"    Tools: {len(tools)}")
-                        for tool in tools[:5]:  # Show first 5 tools
-                            console.print(f"      - {tool.name}")
-        
-        elif cmd == '/dream':
-            # Run dream process
-            console.print("[bold]Starting Dream Process...[/bold]")
-            from pathlib import Path
-            from code_gen.memory import MemorySystem
-            work_dir = Path.cwd()
-            memory_system = MemorySystem(work_dir)
-            
-            if not memory_system.memories:
-                console.print("[yellow]No memories to dream about.[/yellow]")
-                return
-            
-            console.print(f"[dim]Found {len(memory_system.memories)} memories[/dim]\n")
-            
-            # Run dream
-            asyncio.run(self._run_dream_process(memory_system))
-            
-            console.print("\n[yellow]Dream process completed![/yellow]")
-        
-        elif cmd == '/memories':
-            # Show memories
-            console.print("[bold]Memories[/bold]")
-            from pathlib import Path
-            from code_gen.memory import MemorySystem
-            work_dir = Path.cwd()
-            memory_system = MemorySystem(work_dir)
-            
-            if not memory_system.memories:
-                console.print("[dim]No memories found.[/dim]")
-                return
-            
-            console.print(f"\n[dim]Found {len(memory_system.memories)} memories:[/dim]\n")
-            
-            for memory in memory_system.memories:
-                console.print(f"[bold]{memory.type}:[/bold] {memory.id}")
-                console.print(f"  {memory.content[:200]}...")
-                if memory.tags:
-                    console.print(f"  [dim]Tags: {', '.join(memory.tags)}[/dim]")
-                console.print()
-        
-        elif cmd == '/security':
-            # Run security monitor
-            console.print("[bold]Security Monitor[/bold]")
-            from pathlib import Path
-            from code_gen.security import SecurityMonitor, SecurityConfig
-            work_dir = Path.cwd()
-            security = SecurityMonitor(work_dir, SecurityConfig())
-            security.print_security_report()
-        
+                console.print("[yellow]Skill system not initialized[/yellow]")
         elif cmd == '/cost':
-            # Show cost tracking
-            console.print("[bold]Cost Tracking[/bold]")
             if self.cost_tracker:
-                summary = self.cost_tracker.get_cost_summary()
-                console.print(f"\n[bold]Total Cost:[/bold] ${summary['total_cost']:.6f}")
-                console.print(f"[bold]Total Input Tokens:[/bold] {summary['total_input_tokens']}")
-                console.print(f"[bold]Total Output Tokens:[/bold] {summary['total_output_tokens']}")
-                console.print(f"[bold]Total Sessions:[/bold] {summary['total_sessions']}")
-                
-                if summary['model_breakdown']:
-                    console.print("\n[bold]Model Breakdown:[/bold]")
-                    for model, data in summary['model_breakdown'].items():
-                        console.print(f"  {model}:")
-                        console.print(f"    Cost: ${data['cost']:.6f}")
-                        console.print(f"    Input Tokens: {data['input_tokens']}")
-                        console.print(f"    Output Tokens: {data['output_tokens']}")
-                        console.print(f"    Sessions: {data['sessions']}")
+                cost_info = self.cost_tracker.get_cost_summary()
+                console.print(f"[bold cyan]Cost Summary:[/bold cyan]")
+                console.print(f"  Total Cost: ${cost_info.get('total_cost', 0):.4f}")
+                console.print(f"  Total Tokens: {cost_info.get('total_tokens', 0)}")
             else:
-                console.print("[dim]Cost tracker not initialized[/dim]")
-        
+                console.print("[yellow]Cost tracker not initialized[/yellow]")
         elif cmd == '/history':
-            # Show history
-            console.print("[bold]History[/bold]")
             if self.history_system:
-                items = self.history_system.get_recent_items(10)
-                console.print(f"\n[dim]Found {len(items)} recent items:[/dim]\n")
-                
-                for item in items:
-                    console.print(f"[bold]{item.type}:[/bold] {item.id}")
-                    console.print(f"  {item.content[:100]}...")
-                    console.print(f"  [dim]{item.timestamp}[/dim]")
-                    console.print()
+                history = self.history_system.get_recent_items(10)
+                console.print("[bold cyan]Recent History:[/bold cyan]")
+                for item in history:
+                    console.print(f"  [{item.timestamp}] {item.item_type}: {item.content[:50]}...")
             else:
-                console.print("[dim]History system not initialized[/dim]")
-    
-    async def _run_dream_process(self, memory_system):
-        """Run dream process using AI"""
-        try:
-            # Show progress
-            console.print("\n[dim]Dreaming...[/dim]")
-            
-            # Run dream
-            result = await memory_system.dream_async()
-            
-            # Display dream result
-            console.print("\n" + "=" * 60)
-            console.print(Panel(
-                result,
-                title="[bold green]Dream Result[/bold green]",
-                border_style="green"
-            ))
-            console.print("=" * 60 + "\n")
-            
-            # Save dream result
-            from code_gen.commands.dream import _save_dream_result
-            await _save_dream_result(Path.cwd(), result)
-            
-        except Exception as e:
-            console.print(f"[red]Dream process failed: {e}[/red]")
-            raise
+                console.print("[yellow]History system not initialized[/yellow]")
+        elif cmd == '/dream':
+            console.print("[dim]Running dreaming process...[/dim]")
+            # Trigger dreaming
+            if self.memory_system:
+                self.memory_system.dream()
+                console.print("[green]Dreaming complete![/green]")
+            else:
+                console.print("[yellow]Memory system not initialized[/yellow]")
+        elif cmd == '/security':
+            if self.security_monitor:
+                status = self.security_monitor.get_status()
+                console.print("[bold cyan]Security Status:[/bold cyan]")
+                console.print(f"  Prompt Injection: {'Enabled' if status.get('prompt_injection_detection') else 'Disabled'}")
+                console.print(f"  Scope Creep: {'Enabled' if status.get('scope_creep_detection') else 'Disabled'}")
+                console.print(f"  Accidental Damage: {'Enabled' if status.get('accidental_damage_detection') else 'Disabled'}")
+            else:
+                console.print("[yellow]Security monitor not initialized[/yellow]")
+        elif cmd == '/reset':
+            self.session.clear_messages()
+            console.print("[green]Session reset![/green]")
+        elif cmd == '/save':
+            filename = parts[1] if len(parts) > 1 else None
+            if self.session.save(filename):
+                console.print(f"[green]Conversation saved![/green]")
+            else:
+                console.print("[red]Failed to save conversation[/red]")
+        elif cmd == '/load':
+            filename = parts[1] if len(parts) > 1 else None
+            if self.session.load(filename):
+                console.print(f"[green]Conversation loaded![/green]")
+            else:
+                console.print("[red]Failed to load conversation[/red]")
+        elif cmd == '/exit':
+            self.running = False
+            console.print("[yellow]Exiting...[/yellow]")
+        else:
+            console.print(f"[yellow]Unknown command: {cmd}[/yellow]")
     
     def _check_dream_schedule(self):
-        """Check if it's time to dream automatically"""
+        """Check if it's time to run the dreaming process"""
         from pathlib import Path
-        from datetime import datetime, timedelta
+        import time
         
-        # Dream directory
-        dream_dir = Path.cwd() / ".claude" / "dreams"
-        dream_dir.mkdir(parents=True, exist_ok=True)
+        if not self.memory_system:
+            return
         
-        # Check last dream time
-        last_dream_file = dream_dir / ".last_dream"
+        # Check if enough time has passed since last dream
+        # For now, just check if it's been more than 1 hour
+        last_dream = getattr(self.memory_system, 'last_dream_time', 0)
+        current_time = time.time()
         
-        try:
-            if last_dream_file.exists():
-                # Read last dream time
-                with open(last_dream_file, 'r', encoding='utf-8') as f:
-                    last_dream_str = f.read().strip()
-                
-                last_dream = datetime.fromisoformat(last_dream_str)
-                
-                # Dream every 24 hours
-                if datetime.now() - last_dream < timedelta(hours=24):
-                    return
-            else:
-                # First time, no dream yet
-                pass
-            
-            # Check if there are memories to dream about
-            from code_gen.memory import MemorySystem
-            memory_system = MemorySystem(Path.cwd())
-            
-            if not memory_system.memories:
-                return
-            
-            # Run automatic dream
-            console.print("\n[dim]Automatic dream scheduled...[/dim]")
-            asyncio.run(self._run_dream_process(memory_system))
-            
-            # Update last dream time
-            with open(last_dream_file, 'w', encoding='utf-8') as f:
-                f.write(datetime.now().isoformat())
-                
-        except Exception as e:
-            console.print(f"[yellow]Warning: Dream check failed: {e}[/yellow]")
-    
-    def _show_help(self):
-        """Show help information"""
-        console.print("[bold]Available Commands:[/bold]")
-        console.print("  /clear    - Clear the screen")
-        console.print("  /files    - Show context files")
-        console.print("  /skills   - Show available skills")
-        console.print("  /mcp      - Show MCP status")
-        console.print("  /dream    - Run dream process to extract insights")
-        console.print("  /memories - Show stored memories")
-        console.print("  /security - Run security monitor")
-        console.print("  /cost     - Show cost tracking")
-        console.print("  /history  - Show conversation history")
-        console.print("  /help     - Show this help")
-        console.print("\nType 'exit' or press Ctrl+C to quit")
+        if current_time - last_dream > 3600:  # 1 hour
+            # Run dreaming in background
+            try:
+                self.memory_system.dream()
+                self.memory_system.last_dream_time = current_time
+            except:
+                pass  # Silently fail if dreaming doesn't work

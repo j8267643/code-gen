@@ -27,7 +27,7 @@ class HistorySystem:
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
-        self.history_path = work_dir / ".claude" / "history.jsonl"
+        self.history_path = work_dir / ".code_gen" / "history.jsonl"
         self.items: list[HistoryItem] = []
         self._load_history()
     

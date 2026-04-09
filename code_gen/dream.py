@@ -39,8 +39,8 @@ class DreamMemorySystem:
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
-        self.memdir_path = work_dir / ".claude" / "memdir"
-        self.dream_dir = work_dir / ".claude" / "dreams"
+        self.memdir_path = work_dir / ".code_gen" / "memdir"
+        self.dream_dir = work_dir / ".code_gen" / "dreams"
         self.memories: List[Memory] = []
         self.dream_history: List[Dict] = []
         self._load_memories()
@@ -98,7 +98,7 @@ class DreamMemorySystem:
             fragments.append(fragment)
         
         # Collect from session history if available
-        session_dir = self.work_dir / ".claude" / "sessions"
+        session_dir = self.work_dir / ".code_gen" / "sessions"
         if session_dir.exists():
             for session_file in session_dir.glob("*.json"):
                 try:

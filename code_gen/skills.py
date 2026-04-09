@@ -191,7 +191,7 @@ class SkillSystem:
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
-        self.skills_dir = work_dir / ".claude" / "skills"
+        self.skills_dir = work_dir / ".code_gen" / "skills"
         self.skills: dict[str, Skill] = {}
         self._change_detector: Optional[SkillChangeDetector] = None
         self._ensure_skills_dir()
@@ -263,7 +263,7 @@ class SkillSystem:
     
     def load_project_skills(self):
         """Load project-specific skills"""
-        project_skills_dir = self.work_dir / ".claude" / "skills"
+        project_skills_dir = self.work_dir / ".code_gen" / "skills"
         if project_skills_dir.exists():
             for item in project_skills_dir.iterdir():
                 if item.is_file() and item.suffix == '.md':

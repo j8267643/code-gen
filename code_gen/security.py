@@ -38,7 +38,7 @@ class SecurityConfig:
     prompt_injection_enabled: bool = True
     scope_creek_enabled: bool = True
     accidental_damage_enabled: bool = True
-    log_file: str = ".claude/security/events.json"
+    log_file: str = ".code_gen/security/events.json"
     alert_on_threat: bool = True
 
 

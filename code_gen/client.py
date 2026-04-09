@@ -46,7 +46,7 @@ class AnthropicClient(BaseAIClient):
         if not self.api_key:
             raise ValueError(
                 "Anthropic API key not found. "
-                "Set ANTHROPIC_API_KEY environment variable or run 'claude-code login'"
+                "Set ANTHROPIC_API_KEY environment variable or run 'code-gen login'"
             )
         
         self.client = AsyncAnthropic(api_key=self.api_key)
@@ -114,6 +114,17 @@ class OllamaClient(BaseAIClient):
         self.max_tokens = settings.max_tokens
         self.temperature = settings.temperature
     
+    async def _check_model_available(self, client: httpx.AsyncClient) -> bool:
+        """Check if the model is available in Ollama"""
+        try:
+            response = await client.get(f"{self.base_url}/api/tags")
+            response.raise_for_status()
+            data = response.json()
+            models = [m.get("name", "") for m in data.get("models", [])]
+            return self.model in models
+        except Exception:
+            return False
+    
     async def send_message(
         self,
         messages: list[dict],
@@ -121,6 +132,21 @@ class OllamaClient(BaseAIClient):
         tools: Optional[list] = None,
     ) -> str:
         try:
+            # Create client first to check model availability
+            async with httpx.AsyncClient(timeout=30.0) as check_client:
+                if not await self._check_model_available(check_client):
+                    console.print(f"[yellow]Warning: Model '{self.model}' not found in Ollama.[/yellow]")
+                    console.print("[dim]Available models:[/dim]")
+                    try:
+                        response = await check_client.get(f"{self.base_url}/api/tags")
+                        data = response.json()
+                        for m in data.get("models", [])[:5]:
+                            console.print(f"  - {m.get('name', 'unknown')}")
+                    except:
+                        pass
+                    console.print(f"\n[yellow]Try pulling the model:[/yellow]")
+                    console.print(f"  [dim]ollama pull {self.model}[/dim]")
+            
             # Convert messages to Ollama chat format
             ollama_messages = []
             
@@ -160,12 +186,37 @@ class OllamaClient(BaseAIClient):
                 if tools:
                     request_data["tools"] = tools
                 
-                response = await client.post(
-                    f"{self.base_url}/api/chat",
-                    json=request_data
-                )
-                response.raise_for_status()
-                data = response.json()
+                # Try /api/chat endpoint first (for newer Ollama versions)
+                try:
+                    response = await client.post(
+                        f"{self.base_url}/api/chat",
+                        json=request_data
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code == 500:
+                        # Try /api/generate as fallback (for older versions or some models)
+                        console.print("[yellow]Chat endpoint failed, trying generate endpoint...[/yellow]")
+                        prompt = self._build_prompt(ollama_messages, system, tools)
+                        response = await client.post(
+                            f"{self.base_url}/api/generate",
+                            json={
+                                "model": self.model,
+                                "prompt": prompt,
+                                "stream": False,
+                                "options": {
+                                    "temperature": self.temperature,
+                                    "num_predict": min(self.max_tokens, 2048),
+                                }
+                            }
+                        )
+                        response.raise_for_status()
+                        data = response.json()
+                        # Convert generate response to chat format
+                        data = {"message": {"content": data.get("response", "")}}
+                    else:
+                        raise
                 
                 # Handle tool calls
                 message = data.get("message", {})
@@ -191,9 +242,31 @@ class OllamaClient(BaseAIClient):
                 return content
             
         except Exception as e:
-            from rich.console import Console
-            console = Console()
             console.print(f"[red]Error calling Ollama: {e}[/red]")
+            
+            # 显示当前配置信息
+            console.print(f"\n[dim]Current configuration:[/dim]")
+            console.print(f"  Model: {self.model}")
+            console.print(f"  Base URL: {self.base_url}")
+            
+            # 提供详细的排查建议
+            console.print("\n[yellow]Troubleshooting steps:[/yellow]")
+            console.print("  1. Check if Ollama is running:")
+            console.print(f"     [dim]curl {self.base_url}/api/tags[/dim]")
+            console.print("  2. List installed models:")
+            console.print("     [dim]ollama list[/dim]")
+            console.print("  3. Test model directly:")
+            console.print(f"     [dim]ollama run {self.model} \"Hello\"[/dim]")
+            console.print("  4. Check Ollama version:")
+            console.print("     [dim]ollama --version[/dim]")
+            console.print("  5. View Ollama logs:")
+            console.print("     [dim]ollama logs[/dim]")
+            console.print("  6. Restart Ollama:")
+            console.print("     [dim]ollama serve[/dim]")
+            
+            console.print("\n[yellow]Configuration file:[/yellow]")
+            config_path = Path.cwd() / ".code_gen" / "config.yaml"
+            console.print(f"  [dim]{config_path}[/dim]")
             raise
     
     async def stream_message(

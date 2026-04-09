@@ -40,7 +40,7 @@ class CostTracker:
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
-        self.config_path = work_dir / ".claude" / "cost_config.json"
+        self.config_path = work_dir / ".code_gen" / "cost_config.json"
         self.usage_history: List[CostEntry] = []
         self.model_usage: dict[str, TokenUsage] = {}
         self.model_costs: dict = {
@@ -102,7 +102,7 @@ class CostTracker:
     
     def _save_history(self):
         """Save usage history"""
-        history_path = self.work_dir / ".claude" / "cost_history.json"
+        history_path = self.work_dir / ".code_gen" / "cost_history.json"
         history_path.parent.mkdir(parents=True, exist_ok=True)
         
         try:

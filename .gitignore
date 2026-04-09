@@ -41,3 +41,6 @@ Thumbs.db
 *.log
 memories/
 *.json
+
+# Code Gen local data
+.code_gen/

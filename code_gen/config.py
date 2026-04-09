@@ -19,10 +19,10 @@ class ModelProvider(str, Enum):
 
 
 class Settings(BaseSettings):
-    """Claude Code settings"""
+    """Code Gen settings"""
     
     # Application
-    app_name: str = "Claude Code"
+    app_name: str = "Code Gen"
     version: str = "3.0.0"
     
     # Model Provider
@@ -53,10 +53,10 @@ class Settings(BaseSettings):
     temperature: float = 0.7
     
     # Paths
-    config_dir: Path = Path.home() / ".config" / "claude-code"
-    sessions_dir: Path = Field(default_factory=lambda: Path.home() / ".config" / "claude-code" / "sessions")
-    snapshots_dir: Path = Field(default_factory=lambda: Path.home() / ".config" / "claude-code" / "snapshots")
-    cache_dir: Path = Field(default_factory=lambda: Path.home() / ".cache" / "claude-code")
+    config_dir: Path = Path.home() / ".config" / "code-gen"
+    sessions_dir: Path = Field(default_factory=lambda: Path.home() / ".config" / "code-gen" / "sessions")
+    snapshots_dir: Path = Field(default_factory=lambda: Path.home() / ".config" / "code-gen" / "snapshots")
+    cache_dir: Path = Field(default_factory=lambda: Path.home() / ".cache" / "code-gen")
     
     # Features
     auto_commit: bool = False
@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     git_user_email: Optional[str] = None
     
     # Plugin settings
-    plugin_dir: str = Field(default=".claude/plugins", description="Plugin directory relative to project")
+    plugin_dir: str = Field(default=".code_gen/plugins", description="Plugin directory relative to project")
     enable_plugins: bool = Field(default=True, description="Enable plugin system")
     
     # Skill settings
@@ -110,8 +110,80 @@ class Settings(BaseSettings):
     
     def _load_user_config(self):
         """Load user configuration from file"""
-        config_file = self.config_dir / "settings.json"
+        # 首先尝试从项目目录的 .code_gen/config.yaml 加载
+        import yaml
         
+        project_config = Path.cwd() / ".code_gen" / "config.yaml"
+        if project_config.exists():
+            try:
+                with open(project_config, 'r', encoding='utf-8') as f:
+                    config_data = yaml.safe_load(f) or {}
+                
+                # 从新的嵌套格式加载配置
+                if 'model_provider' in config_data:
+                    try:
+                        self.model_provider = ModelProvider(config_data['model_provider'])
+                    except ValueError:
+                        pass
+                
+                # 加载 anthropic 配置
+                if 'anthropic' in config_data:
+                    anthropic = config_data['anthropic']
+                    if 'api_key' in anthropic:
+                        self.anthropic_api_key = anthropic['api_key']
+                    if 'model' in anthropic:
+                        self.anthropic_model = anthropic['model']
+                
+                # 加载 ollama 配置
+                if 'ollama' in config_data:
+                    ollama = config_data['ollama']
+                    if 'base_url' in ollama:
+                        self.ollama_base_url = ollama['base_url']
+                    if 'model' in ollama:
+                        self.ollama_model = ollama['model']
+                
+                # 加载 lmstudio 配置
+                if 'lmstudio' in config_data:
+                    lmstudio = config_data['lmstudio']
+                    if 'base_url' in lmstudio:
+                        self.lmstudio_base_url = lmstudio['base_url']
+                    if 'model' in lmstudio:
+                        self.lmstudio_model = lmstudio['model']
+                
+                # 加载 openai_compatible 配置
+                if 'openai_compatible' in config_data:
+                    openai_cfg = config_data['openai_compatible']
+                    if 'base_url' in openai_cfg:
+                        self.openai_compatible_base_url = openai_cfg['base_url']
+                    if 'api_key' in openai_cfg:
+                        self.openai_compatible_api_key = openai_cfg['api_key']
+                    if 'model' in openai_cfg:
+                        self.openai_compatible_model = openai_cfg['model']
+                
+                # 加载 generation 配置
+                if 'generation' in config_data:
+                    gen = config_data['generation']
+                    if 'max_tokens' in gen:
+                        self.max_tokens = gen['max_tokens']
+                    if 'temperature' in gen:
+                        self.temperature = gen['temperature']
+                
+                # 加载 features 配置
+                if 'features' in config_data:
+                    features = config_data['features']
+                    if 'auto_commit' in features:
+                        self.auto_commit = features['auto_commit']
+                    if 'verbose' in features:
+                        self.verbose = features['verbose']
+                    if 'show_token_count' in features:
+                        self.show_token_count = features['show_token_count']
+                
+                return
+            except Exception as e:
+                print(f"Warning: Failed to load project config: {e}")
+        
+        # 回退到旧的 settings.json
+        config_file = self.config_dir / "settings.json"
         if not config_file.exists():
             return
         

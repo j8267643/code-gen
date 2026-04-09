@@ -31,7 +31,7 @@ class PromptSuggestionSystem:
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
-        self.suggestions_path = work_dir / ".claude" / "prompt_suggestions.json"
+        self.suggestions_path = work_dir / ".code_gen" / "prompt_suggestions.json"
         self.suggestions: list[PromptSuggestion] = []
         self._load_suggestions()
     

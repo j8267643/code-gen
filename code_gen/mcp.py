@@ -189,7 +189,7 @@ class HTTPTransport(MCPTransport):
         try:
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "Claude-Code-Python/1.0.0"
+                "User-Agent": "Code-Gen-Python/1.0.0"
             }
             headers.update(self.config.headers)
             

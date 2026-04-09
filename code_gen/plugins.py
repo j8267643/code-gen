@@ -191,7 +191,7 @@ class PluginLoader:
     
     def load_project_plugins(self):
         """Load project-specific plugins"""
-        plugins_dir = self.work_dir / ".claude" / "plugins"
+        plugins_dir = self.work_dir / ".code_gen" / "plugins"
         
         if not plugins_dir.exists():
             return

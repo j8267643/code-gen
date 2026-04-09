@@ -167,7 +167,7 @@ async def _save_dream_result(work_dir: Path, result: str) -> None:
         work_dir: Working directory
         result: Dream result string
     """
-    dream_dir = work_dir / ".claude" / "dreams"
+    dream_dir = work_dir / ".code_gen" / "dreams"
     dream_dir.mkdir(parents=True, exist_ok=True)
     
     timestamp = Path().home().name  # Use a simple timestamp

@@ -1,5 +1,5 @@
 """
-Integration module for Claude Code
+Integration module for Code Gen
 Combines all new features into a unified system
 """
 from pathlib import Path
@@ -22,8 +22,8 @@ from .security import SecurityMonitor, SecurityConfig
 from .schemas import ControlRequest, ControlResponse, SDKMessage, ToolUse, ToolResult
 
 
-class ClaudeCodeIntegration:
-    """Main integration class for Claude Code"""
+class CodeGenIntegration:
+    """Main integration class for Code Gen"""
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir

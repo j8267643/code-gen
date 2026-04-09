@@ -91,7 +91,7 @@ class PermissionSystem:
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
-        self.config_dir = work_dir / ".claude"
+        self.config_dir = work_dir / ".code_gen"
         self.permissions_file = self.config_dir / "permissions.json"
         self._permissions: Dict[str, Dict[str, Any]] = {}
         self._ensure_config_dir()
@@ -166,7 +166,7 @@ class ToolResultStorage:
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
-        self.results_dir = work_dir / ".claude" / "tool_results"
+        self.results_dir = work_dir / ".code_gen" / "tool_results"
         self._ensure_results_dir()
     
     def _ensure_results_dir(self):

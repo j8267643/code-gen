@@ -8,7 +8,7 @@ from rich.prompt import Prompt
 from code_gen.config import settings
 
 console = Console()
-SERVICE_NAME = "claude-code"
+SERVICE_NAME = "code-gen"
 USERNAME = "api-key"
 
 
@@ -28,7 +28,7 @@ def login_user(api_key: str = None):
     keyring.set_password(SERVICE_NAME, USERNAME, api_key)
     
     console.print("[green]✓ API key saved successfully![/green]")
-    console.print("[dim]You can now use Claude Code[/dim]")
+    console.print("[dim]You can now use Code Gen[/dim]")
 
 
 def logout_user():
@@ -52,5 +52,5 @@ def get_api_key() -> str:
         return api_key
     
     raise ValueError(
-        "API key not found. Run 'claude-code login' or set ANTHROPIC_API_KEY"
+        "API key not found. Run 'code-gen login' or set ANTHROPIC_API_KEY"
     )

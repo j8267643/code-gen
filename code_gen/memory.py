@@ -36,7 +36,7 @@ class MemorySystem:
     
     def __init__(self, work_dir: Path):
         self.work_dir = work_dir
-        self.memdir_path = work_dir / ".claude" / "memdir"
+        self.memdir_path = work_dir / ".code_gen" / "memdir"
         self.memories: list[Memory] = []
         self._load_memories()
     

@@ -1,10 +1,17 @@
 """
-Claude Code CLI
+Code Gen CLI
 """
 import sys
 import asyncio
 from pathlib import Path
 from typing import Optional
+
+# Check for PyYAML dependency
+try:
+    import yaml
+except ImportError:
+    print("Error: PyYAML is required. Install with: pip install PyYAML")
+    sys.exit(1)
 
 import typer
 from rich.console import Console
@@ -12,7 +19,7 @@ from rich.table import Table
 
 from code_gen.config import ModelProvider, settings
 from code_gen.session import SessionManager
-from code_gen.ui.app import ClaudeCodeApp
+from code_gen.ui.app import CodeGenApp
 
 app = typer.Typer(pretty_exceptions_enable=False)
 console = Console()
@@ -35,35 +42,149 @@ def chat(
     ),
 ):
     """Start an interactive coding session with AI"""
+    import os
+    
     work_dir = path or Path.cwd()
     
-    # Show current provider info
-    import os
-    provider = settings.model_provider
+    # 配置文件放在项目根目录的 .code_gen 文件夹中
+    config_path = work_dir / ".code_gen" / "config.yaml"
     
-    # Get model name from environment variable if available, otherwise use settings
+    # 如果配置文件不存在，创建默认配置文件
+    if not config_path.exists():
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        default_config = '''# =============================================================================
+# Code Gen Configuration File
+# =============================================================================
+# This is the main configuration file for Code Gen.
+# All settings can be overridden via environment variables.
+#
+# Location: {config_path}
+# Documentation: https://github.com/your-repo/code-gen/blob/main/docs/config.md
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Core Settings
+# -----------------------------------------------------------------------------
+
+# Model provider to use
+# Options: anthropic, ollama, lmstudio, openai_compatible
+model_provider: anthropic
+
+# -----------------------------------------------------------------------------
+# Anthropic Claude (Cloud API)
+# -----------------------------------------------------------------------------
+anthropic:
+  api_key: ""                          # Set via ANTHROPIC_API_KEY env var
+  model: claude-3-5-sonnet-20241022    # Model identifier
+
+# -----------------------------------------------------------------------------
+# Ollama (Local Models)
+# -----------------------------------------------------------------------------
+ollama:
+  base_url: http://localhost:11434     # Ollama server URL
+  model: codellama                     # Default local model
+
+# -----------------------------------------------------------------------------
+# LM Studio (Local Server)
+# -----------------------------------------------------------------------------
+lmstudio:
+  base_url: http://localhost:1234/v1   # LM Studio server URL
+  model: local-model                   # Model name
+
+# -----------------------------------------------------------------------------
+# OpenAI Compatible (Generic)
+# -----------------------------------------------------------------------------
+openai_compatible:
+  base_url: ""                         # API base URL
+  api_key: ""                          # API key (if required)
+  model: local-model                   # Model identifier
+
+# -----------------------------------------------------------------------------
+# Generation Parameters
+# -----------------------------------------------------------------------------
+generation:
+  max_tokens: 4096                     # Maximum tokens per response
+  temperature: 0.7                     # Creativity (0.0 = deterministic, 1.0 = creative)
+
+# -----------------------------------------------------------------------------
+# Feature Flags
+# -----------------------------------------------------------------------------
+features:
+  auto_commit: false                   # Auto-commit changes
+  verbose: false                       # Verbose output
+  show_token_count: true               # Display token usage
+
+# -----------------------------------------------------------------------------
+# Plugin & Skill Settings
+# -----------------------------------------------------------------------------
+plugins:
+  enabled: true
+  directory: .code_gen/plugins
+
+skills:
+  enabled: true
+  directory: skills
+
+# -----------------------------------------------------------------------------
+# Git Settings
+# -----------------------------------------------------------------------------
+git:
+  user_name: ""                        # Git commit author name
+  user_email: ""                       # Git commit author email
+'''.format(config_path=config_path)
+        config_path.write_text(default_config, encoding='utf-8')
+        console.print(f"[green]✓ Created default config file: {config_path}[/green]")
+    
+    # 从配置文件加载设置
+    config_data = {}
+    if config_path.exists():
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                config_data = yaml.safe_load(f) or {}
+        except Exception as e:
+            console.print(f"[yellow]Warning: Failed to load config file: {e}[/yellow]")
+    
+    # 获取模型提供商（优先级：环境变量 > 配置文件 > 默认设置）
+    provider_str = os.getenv('MODEL_PROVIDER', config_data.get('model_provider', settings.model_provider.value))
+    try:
+        provider = ModelProvider(provider_str)
+    except ValueError:
+        provider = ModelProvider.ANTHROPIC
+    
+    # 获取模型名称（优先级：命令行参数 > 环境变量 > 配置文件 > 默认设置）
     if model:
         model_name = model
     elif provider == ModelProvider.OLLAMA:
-        model_name = os.getenv('OLLAMA_MODEL', settings.ollama_model)
+        model_name = os.getenv('OLLAMA_MODEL', 
+            config_data.get('ollama', {}).get('model', settings.ollama_model))
     elif provider == ModelProvider.LMSTUDIO:
-        model_name = os.getenv('LMSTUDIO_MODEL', settings.lmstudio_model)
+        model_name = os.getenv('LMSTUDIO_MODEL',
+            config_data.get('lmstudio', {}).get('model', settings.lmstudio_model))
     elif provider == ModelProvider.OPENAI_COMPATIBLE:
-        model_name = os.getenv('OPENAI_COMPATIBLE_MODEL', settings.openai_compatible_model)
+        model_name = os.getenv('OPENAI_COMPATIBLE_MODEL',
+            config_data.get('openai_compatible', {}).get('model', settings.openai_compatible_model))
     else:
-        model_name = settings.get_model_config().get("model", "unknown")
+        model_name = config_data.get('anthropic', {}).get('model', settings.anthropic_model)
     
-    # Check if auth required
-    if settings.requires_api_key() and not settings.anthropic_api_key:
+    # 检查是否需要 API key（Ollama 和 LM Studio 不需要）
+    api_key = os.getenv('ANTHROPIC_API_KEY') or config_data.get('anthropic', {}).get('api_key', '')
+    
+    if provider == ModelProvider.ANTHROPIC and not api_key:
         console.print("[red]Error: API key required for Anthropic provider[/red]")
-        console.print("Run [yellow]claude-code login[/yellow] or set ANTHROPIC_API_KEY")
+        console.print(f"[dim]Current default model: {model_name}[/dim]")
+        console.print(f"[dim]Provider: {provider.value}[/dim]")
+        console.print("\n[yellow]To configure:[/yellow]")
+        console.print("  1. Run [cyan]code-gen login[/cyan] to set API key")
+        console.print("  2. Or set [cyan]ANTHROPIC_API_KEY[/cyan] environment variable")
+        console.print("  3. Or modify config file directly:")
+        console.print(f"     [dim]{config_path}[/dim]")
         sys.exit(1)
     
     # Start interactive session
     session = SessionManager(work_dir, model_name)
     
     try:
-        app_instance = ClaudeCodeApp(session)
+        app_instance = CodeGenApp(session)
         app_instance.run()
     except KeyboardInterrupt:
         console.print("\n[yellow]Goodbye![/yellow]")
@@ -211,7 +332,7 @@ def provider(
         
         console.print(table)
         console.print(f"\n[dim]Current provider: {current}[/dim]")
-        console.print("\nTo switch: [yellow]claude-code provider <name>[/yellow]")
+        console.print("\nTo switch: [yellow]code-gen provider <name>[/yellow]")
         return
     
     # Switch provider
@@ -234,7 +355,7 @@ def provider(
             console.print(f"[dim]Make sure LM Studio server is running at {settings.lmstudio_base_url}[/dim]")
         elif new_provider == ModelProvider.ANTHROPIC:
             if not settings.anthropic_api_key:
-                console.print("[yellow]Warning: No API key set. Run 'claude-code login'[/yellow]")
+                console.print("[yellow]Warning: No API key set. Run 'code-gen login'[/yellow]")
         
     except ValueError:
         console.print(f"[red]Invalid provider: {name}[/red]")
