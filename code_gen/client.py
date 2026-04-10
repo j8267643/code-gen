@@ -111,19 +111,24 @@ class OllamaClient(BaseAIClient):
         # Read from environment variables directly to ensure fresh values
         self.base_url = os.getenv('OLLAMA_BASE_URL', settings.ollama_base_url).rstrip('/')
         self.model = os.getenv('OLLAMA_MODEL', settings.ollama_model)
-        self.max_tokens = settings.max_tokens
+        # Use Ollama-specific max_tokens if available, otherwise fall back to general setting
+        self.max_tokens = settings.ollama_max_tokens or 65535
         self.temperature = settings.temperature
     
-    async def _check_model_available(self, client: httpx.AsyncClient) -> bool:
-        """Check if the model is available in Ollama"""
+    async def _get_available_models(self, client: httpx.AsyncClient) -> tuple[bool, list[str]]:
+        """Get available models from Ollama and check if current model exists.
+        
+        Returns:
+            tuple: (model_exists: bool, available_models: list of model names)
+        """
         try:
             response = await client.get(f"{self.base_url}/api/tags")
             response.raise_for_status()
             data = response.json()
             models = [m.get("name", "") for m in data.get("models", [])]
-            return self.model in models
+            return self.model in models, models
         except Exception:
-            return False
+            return False, []
     
     async def send_message(
         self,
@@ -134,16 +139,12 @@ class OllamaClient(BaseAIClient):
         try:
             # Create client first to check model availability
             async with httpx.AsyncClient(timeout=30.0) as check_client:
-                if not await self._check_model_available(check_client):
+                model_exists, available_models = await self._get_available_models(check_client)
+                if not model_exists:
                     console.print(f"[yellow]Warning: Model '{self.model}' not found in Ollama.[/yellow]")
                     console.print("[dim]Available models:[/dim]")
-                    try:
-                        response = await check_client.get(f"{self.base_url}/api/tags")
-                        data = response.json()
-                        for m in data.get("models", [])[:5]:
-                            console.print(f"  - {m.get('name', 'unknown')}")
-                    except:
-                        pass
+                    for model_name in available_models[:5]:
+                        console.print(f"  - {model_name}")
                     console.print(f"\n[yellow]Try pulling the model:[/yellow]")
                     console.print(f"  [dim]ollama pull {self.model}[/dim]")
             
@@ -178,7 +179,7 @@ class OllamaClient(BaseAIClient):
                     "stream": False,
                     "options": {
                         "temperature": self.temperature,
-                        "num_predict": min(self.max_tokens, 2048),
+                        "num_predict": self.max_tokens,
                     }
                 }
                 
@@ -207,7 +208,7 @@ class OllamaClient(BaseAIClient):
                                 "stream": False,
                                 "options": {
                                     "temperature": self.temperature,
-                                    "num_predict": min(self.max_tokens, 2048),
+                                    "num_predict": self.max_tokens,
                                 }
                             }
                         )

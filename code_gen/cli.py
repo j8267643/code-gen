@@ -6,13 +6,6 @@ import asyncio
 from pathlib import Path
 from typing import Optional
 
-# Check for PyYAML dependency
-try:
-    import yaml
-except ImportError:
-    print("Error: PyYAML is required. Install with: pip install PyYAML")
-    sys.exit(1)
-
 import typer
 from rich.console import Console
 from rich.table import Table
@@ -43,6 +36,13 @@ def chat(
 ):
     """Start an interactive coding session with AI"""
     import os
+    
+    # Check for PyYAML dependency
+    try:
+        import yaml
+    except ImportError:
+        console.print("[red]Error: PyYAML is required. Install with: pip install PyYAML[/red]")
+        raise typer.Exit(1)
     
     work_dir = path or Path.cwd()
     

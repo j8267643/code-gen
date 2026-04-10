@@ -236,20 +236,36 @@ class SkillSystem:
             commands=["search"],
             source="bundled"
         )
-        
+
+        # File read skill
+        read_skill = Skill(
+            name="file_read",
+            description="Read file contents",
+            path=str(self.skills_dir / "file_read.md"),
+            patterns=["read", "read file", "show file", "open file"],
+            commands=["read"],
+            source="bundled"
+        )
+
         self.skills[review_skill.name] = review_skill
         self.skills[commit_skill.name] = commit_skill
         self.skills[search_skill.name] = search_skill
+        self.skills[read_skill.name] = read_skill
     
     def load_skills(self):
-        """Load skills from directory"""
-        if not self.skills_dir.exists():
-            return
-        
-        for item in self.skills_dir.iterdir():
-            if item.is_file() and item.suffix == '.md':
-                self._load_skill_file(item)
-        
+        """Load all skills - bundled, from directory, and project-specific"""
+        # Load bundled skills
+        self.load_bundled_skills()
+
+        # Load skills from skills directory
+        if self.skills_dir.exists():
+            for item in self.skills_dir.iterdir():
+                if item.is_file() and item.suffix == '.md':
+                    self._load_skill_file(item)
+
+        # Load project-specific skills from .code_gen/skills
+        self.load_project_skills()
+
         # Initialize file hashes for change detection
         if self._change_detector:
             self._change_detector._file_hashes = {
@@ -262,39 +278,74 @@ class SkillSystem:
         self._create_default_skills()
     
     def load_project_skills(self):
-        """Load project-specific skills"""
+        """Load project-specific skills from .code_gen/skills directory"""
         project_skills_dir = self.work_dir / ".code_gen" / "skills"
-        if project_skills_dir.exists():
-            for item in project_skills_dir.iterdir():
-                if item.is_file() and item.suffix == '.md':
-                    self._load_skill_file(item)
+        if not project_skills_dir.exists():
+            return
+
+        # Look for SKILL.md in subdirectories (e.g., .code_gen/skills/browser-automation/SKILL.md)
+        for skill_dir in project_skills_dir.iterdir():
+            if skill_dir.is_dir():
+                skill_file = skill_dir / "SKILL.md"
+                if skill_file.exists():
+                    self._load_skill_file(skill_file, skill_name=skill_dir.name)
+
+        # Also load any .md files directly in the skills directory (for backwards compatibility)
+        for item in project_skills_dir.iterdir():
+            if item.is_file() and item.suffix == '.md':
+                self._load_skill_file(item)
     
-    def _load_skill_file(self, path: Path):
+    def _load_skill_file(self, path: Path, skill_name: str = None):
         """Load a skill from file"""
         try:
             with open(path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            
+
+            # Use provided name or extract from filename
+            name = skill_name or path.stem
+
             # Parse skill from markdown
             skill = Skill(
-                name=path.stem,
+                name=name,
                 description=self._extract_description(content),
                 path=str(path),
                 patterns=self._extract_patterns(content),
                 commands=self._extract_commands(content),
                 source="local"
             )
-            
+
             self.skills[skill.name] = skill
-            
+            logger.info(f"Loaded skill: {skill.name} from {path}")
+
         except Exception as e:
             logger.error(f"Failed to load skill from {path}: {e}")
     
     def _extract_description(self, content: str) -> str:
         """Extract description from skill content"""
         lines = content.split('\n')
-        if lines:
-            return lines[0].strip('#').strip()
+
+        # Check for YAML front matter
+        if lines and lines[0].strip() == '---':
+            # Look for description in YAML front matter
+            in_front_matter = True
+            for line in lines[1:]:
+                if line.strip() == '---':
+                    break
+                if line.strip().startswith('description:'):
+                    # Extract description value
+                    desc = line.split(':', 1)[1].strip()
+                    # Remove quotes if present
+                    if (desc.startswith('"') and desc.endswith('"')) or \
+                       (desc.startswith("'") and desc.endswith("'")):
+                        desc = desc[1:-1]
+                    return desc[:200]  # Limit length
+
+        # Fallback to first non-empty line
+        for line in lines:
+            stripped = line.strip()
+            if stripped and stripped != '---':
+                return stripped.strip('#').strip()[:200]
+
         return content[:100]
     
     def _extract_patterns(self, content: str) -> list:

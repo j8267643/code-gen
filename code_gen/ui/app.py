@@ -41,13 +41,10 @@ class CodeGenApp:
         self.prompt_session = PromptSession()
         self.running = True
         self.skill_system = None
-        
+
         # Initialize client first
         self.client = ClaudeClient()
-        
-        # System prompt
-        self.system_prompt = self._build_system_prompt()
-        
+
         # Available tools
         self.tools = (
             FileTools.get_tools() +
@@ -55,25 +52,28 @@ class CodeGenApp:
             GitTools.get_tools() +
             SearchTools.get_tools()
         )
-        
+
         # Load skills
         self._load_skills()
-        
-        # Initialize MCP
+
+        # Initialize MCP (must be before building system prompt)
         self._init_mcp()
-        
+
+        # System prompt (built after MCP initialization)
+        self.system_prompt = self._build_system_prompt()
+
         # Initialize integration
         self._init_integration()
-        
+
         # Initialize memory system
         self._init_memory()
-        
+
         # Initialize security monitor
         self._init_security()
-        
+
         # Initialize cost tracker
         self._init_cost_tracker()
-        
+
         # Initialize history system
         self._init_history()
         
@@ -94,30 +94,89 @@ class CodeGenApp:
     def _load_skills(self):
         """Load skills from skill system"""
         from code_gen.skills import SkillSystem
+        from code_gen.skill_executor import SkillExecutor
         from pathlib import Path
-        
+
         # Initialize skill system
         work_dir = Path.cwd()
         self.skill_system = SkillSystem(work_dir)
         self.skill_system.load_skills()
+
+        # Initialize skill executor
+        self.skill_executor = SkillExecutor(self.skill_system)
+
+        # Update system prompt with loaded skills
+        self.system_prompt = self._build_system_prompt()
+
+        # Log loaded skills
+        if self.skill_system.skills:
+            bundled = sum(1 for s in self.skill_system.skills.values() if s.source == "bundled")
+            local = sum(1 for s in self.skill_system.skills.values() if s.source == "local")
+            console.print(f"[dim]Loaded {len(self.skill_system.skills)} skills ({bundled} built-in, {local} project)[/dim]")
         
     def _init_mcp(self):
-        """Initialize MCP system"""
+        """Initialize MCP system from configuration"""
         from code_gen.mcp import mcp_manager, MCPConnectionConfig, MCPServerType
+        from code_gen.config import settings
         from pathlib import Path
-        
-        # Connect to default MCP server (if configured)
-        config = MCPConnectionConfig(
-            server_type=MCPServerType.STDIO,
-            stdio_command=None
-        )
-        
-        # Try to connect to a default MCP server
+        import asyncio
+
+        if not settings.enable_mcp or not settings.mcp_servers:
+            return
+
+        # Get or create event loop
         try:
-            if self.loop and not self.loop.is_closed():
-                self.loop.run_until_complete(mcp_manager.connect_to_server("default", config))
-        except:
-            pass
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+
+        # Connect to configured MCP servers
+        connected_count = 0
+        for name, server_config in settings.mcp_servers.items():
+            try:
+                server_type_str = server_config.get('type', 'stdio')
+                command = server_config.get('command')
+                url = server_config.get('url')
+                args = server_config.get('args', [])
+
+                # Map type string to enum
+                type_map = {
+                    'stdio': MCPServerType.STDIO,
+                    'sse': MCPServerType.SSE,
+                    'ws': MCPServerType.WS,
+                    'http': MCPServerType.HTTP,
+                }
+                server_type = type_map.get(server_type_str, MCPServerType.STDIO)
+
+                config = MCPConnectionConfig(
+                    server_type=server_type,
+                    stdio_command=command,
+                    stdio_args=args,
+                    url=url
+                )
+
+                client = loop.run_until_complete(
+                    mcp_manager.connect_to_server(name, config)
+                )
+                if client:
+                    connected_count += 1
+                    # Wait a bit for server to fully initialize (use async sleep)
+                    loop.run_until_complete(asyncio.sleep(0.5))
+                    # Ensure tools are discovered
+                    tools = loop.run_until_complete(client.list_tools())
+                    console.print(f"[dim]Connected to MCP server: {name} ({len(tools)} tools)[/dim]")
+
+            except Exception as e:
+                console.print(f"[dim]Failed to connect to MCP server '{name}': {e}[/dim]")
+
+        if connected_count > 0:
+            console.print(f"[dim]Connected to {connected_count} MCP server(s)[/dim]")
+            # Rebuild system prompt with MCP tools
+            self.system_prompt = self._build_system_prompt()
         
     def _init_integration(self):
         """Initialize integration systems"""
@@ -141,9 +200,36 @@ class CodeGenApp:
         work_dir = Path.cwd()
         self.history_system = HistorySystem(work_dir)
     
+    def _build_mcp_tools_section(self) -> str:
+        """Build the MCP tools section for system prompt"""
+        from code_gen.mcp import mcp_manager
+
+        lines = ["Available MCP tools:"]
+
+        # Get all tools from connected MCP servers
+        all_tools = []
+        for server_name, client in mcp_manager.clients.items():
+            if client.connected and client.tools:
+                for tool in client.tools:
+                    all_tools.append((server_name, tool))
+
+        if all_tools:
+            for server_name, tool in all_tools:
+                desc = tool.description[:60] + "..." if len(tool.description) > 60 else tool.description
+                lines.append(f"- {tool.name} ({server_name}): {desc}")
+        else:
+            lines.append("- No MCP servers connected")
+
+        return "\n".join(lines)
+
     def _build_system_prompt(self) -> str:
         """Build system prompt for Claude"""
-        return """You are Claude Code, an AI-powered coding assistant.
+        # Build skills section dynamically
+        skills_section = self._build_skills_section()
+        # Build MCP tools section dynamically
+        mcp_tools_section = self._build_mcp_tools_section()
+
+        return f"""You are Claude Code, an AI-powered coding assistant.
 You help users write, understand, and modify code.
 
 IMPORTANT: You have memory of previous conversations in this session.
@@ -170,15 +256,10 @@ Available tools:
 - search_files: Search for text in files
 - get_file_info: Get file information
 
-Available MCP tools:
-- mcp__file_read: Read files via MCP
-- mcp__file_write: Write files via MCP
-- mcp__execute_command: Execute commands via MCP
+MCP (Model Context Protocol) tools are external tools provided by MCP servers:
+{mcp_tools_section}
 
-Available Skills:
-- code_review: Review code and suggest improvements
-- git_commit: Generate commit messages
-- code_search: Search for code patterns
+{skills_section}
 
 Always use tools when the user asks you to:
 - Read or write files
@@ -190,6 +271,39 @@ Always use tools when the user asks you to:
 
 If the user asks you to remember something or if you've discussed something important,
 use the write_file tool to save it to a memory file."""
+
+    def _build_skills_section(self) -> str:
+        """Build the skills section for system prompt"""
+        if not self.skill_system or not self.skill_system.skills:
+            return "Available Skills:\n- No skills loaded"
+
+        lines = ["Available Skills:"]
+
+        # Group skills by source
+        bundled = []
+        local = []
+
+        for skill in self.skill_system.skills.values():
+            if skill.source == "bundled":
+                bundled.append(skill)
+            else:
+                local.append(skill)
+
+        # Add bundled skills
+        if bundled:
+            lines.append("\nBuilt-in Skills:")
+            for skill in bundled:
+                desc = skill.description[:80] + "..." if len(skill.description) > 80 else skill.description
+                lines.append(f"- {skill.name}: {desc}")
+
+        # Add local/project skills
+        if local:
+            lines.append("\nProject Skills:")
+            for skill in local:
+                desc = skill.description[:80] + "..." if len(skill.description) > 80 else skill.description
+                lines.append(f"- {skill.name}: {desc}")
+
+        return "\n".join(lines)
 
     def run(self):
         """Run the main application loop"""
@@ -243,17 +357,31 @@ use the write_file tool to save it to a memory file."""
                         self._handle_command(user_input)
                         continue
                     
-                    # Check for skill matches
-                    matching_skills = []
-                    if self.skill_system:
+                    # Check for skill matches and execute them
+                    if self.skill_system and self.skill_executor:
                         matching_skills = self.skill_system.get_matching_skills(user_input)
-                    if matching_skills:
-                        console.print(f"[dim]Matching skills: {', '.join(s.name for s in matching_skills)}[/dim]")
-                        # Add skill information to the message
-                        skill_info = "\n\nMatching skills:\n" + "\n".join(
-                            f"- {s.name}: {s.description}" for s in matching_skills
-                        )
-                        user_input += skill_info
+                        if matching_skills:
+                            console.print(f"[dim]Matching skills: {', '.join(s.name for s in matching_skills)}[/dim]")
+                            console.print("[dim]Executing skills...[/dim]")
+
+                            # Execute skills using existing event loop
+                            skill_results = self.loop.run_until_complete(
+                                self.skill_executor.execute_matching_skills(user_input)
+                            )
+
+                            # Display skill results
+                            for result in skill_results:
+                                if result.status.value == "success":
+                                    console.print(f"\n[cyan bold]Skill: {result.skill_name}[/cyan bold]")
+                                    console.print(result.output)
+                                elif result.status.value == "failed":
+                                    console.print(f"[yellow]Skill {result.skill_name} failed: {result.error}[/yellow]")
+
+                            # Add skill information to the message for context
+                            skill_info = "\n\nMatching skills:\n" + "\n".join(
+                                f"- {s.name}: {s.description}" for s in matching_skills
+                            )
+                            user_input += skill_info
                     
                     # Check security before processing
                     if self.security_monitor:
@@ -279,7 +407,7 @@ use the write_file tool to save it to a memory file."""
             console.print("\n[yellow]Goodbye! 👋[/yellow]")
     
     async def _process_message(self, user_input: str):
-        """Process user message with Claude"""
+        """Process user message with CodeGen"""
         try:
             # Show processing status
             console.print("\n[dim]CodeGen is thinking...[/dim]")
@@ -434,7 +562,7 @@ use the write_file tool to save it to a memory file."""
                 )
             
             # Display response with prompt
-            console.print(f"\n[bold blue]Claude Code:[/bold blue]")
+            console.print(f"\n[bold blue]CodeGen:[/bold blue]")
             console.print(Markdown(response))
             console.print(f"\n[dim]Type your message or use /help for commands[/dim]")
             

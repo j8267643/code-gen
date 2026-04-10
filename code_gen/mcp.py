@@ -33,12 +33,15 @@ class MCPConnectionConfig:
     server_type: MCPServerType
     url: Optional[str] = None
     stdio_command: Optional[str] = None
+    stdio_args: list = None
     headers: dict = None
     timeout: int = 30
-    
+
     def __post_init__(self):
         if self.headers is None:
             self.headers = {}
+        if self.stdio_args is None:
+            self.stdio_args = []
 
 
 @dataclass
@@ -242,6 +245,7 @@ class MCPClient:
         self.connected = False
         self.tools: list[MCPTool] = []
         self.transport: Optional[MCPTransport] = None
+        self._process: Optional[asyncio.subprocess.Process] = None  # For stdio
         self._message_handlers: list[Callable] = []
         self._pending_requests: Dict[str, asyncio.Future] = {}
         self._request_callbacks: Dict[str, Callable] = {}
@@ -283,36 +287,89 @@ class MCPClient:
         """Connect via stdio"""
         try:
             logger.info(f"Starting MCP server: {self.config.stdio_command}")
-            
+
             import subprocess
             import sys
-            
+
             if self.config.stdio_command:
-                process = await asyncio.create_subprocess_exec(
-                    *self.config.stdio_command.split(),
-                    stdout=asyncio.subprocess.PIPE,
-                    stdin=asyncio.subprocess.PIPE
+                # Build command with args
+                cmd_parts = self.config.stdio_command.split()
+                if self.config.stdio_args:
+                    cmd_parts.extend(self.config.stdio_args)
+
+                try:
+                    self._process = await asyncio.create_subprocess_exec(
+                        *cmd_parts,
+                        stdout=asyncio.subprocess.PIPE,
+                        stdin=asyncio.subprocess.PIPE
+                    )
+                except FileNotFoundError:
+                    logger.error(f"MCP server command not found: {cmd_parts[0]}")
+                    return False
+                except PermissionError:
+                    logger.error(f"MCP server command not executable: {cmd_parts[0]}")
+                    return False
+                except Exception as e:
+                    logger.error(f"Failed to start MCP server process: {e}")
+                    return False
+
+                # Wait a bit for server to start
+                await asyncio.sleep(0.5)
+
+                # Send initialize request
+                init_request = {
+                    "jsonrpc": "2.0",
+                    "id": str(uuid.uuid4()),
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {},
+                        "clientInfo": {"name": "code-gen", "version": "1.0.0"}
+                    }
+                }
+
+                init_json = json.dumps(init_request) + "\n"
+                self._process.stdin.write(init_json.encode())
+                await self._process.stdin.drain()
+
+                # Read initialize response
+                response_line = await asyncio.wait_for(
+                    self._process.stdout.readline(),
+                    timeout=5.0
                 )
-                
+
+                if response_line:
+                    response = json.loads(response_line.decode())
+                    logger.info(f"MCP server initialized: {response.get('result', {}).get('serverInfo', {}).get('name', 'unknown')}")
+
+                    # Send initialized notification
+                    initialized_notification = {
+                        "jsonrpc": "2.0",
+                        "method": "notifications/initialized"
+                    }
+                    init_notif_json = json.dumps(initialized_notification) + "\n"
+                    self._process.stdin.write(init_notif_json.encode())
+                    await self._process.stdin.drain()
+
                 async def stdio_receive():
-                    while process.stdout and not process.stdout.at_eof():
-                        line = await process.stdout.readline()
+                    while self._process.stdout and not self._process.stdout.at_eof():
+                        line = await self._process.stdout.readline()
                         if line:
                             message = json.loads(line.decode())
                             await self._handle_message(message)
-                
+
                 async def stdio_send(message: dict):
-                    if process.stdin:
+                    if self._process.stdin:
                         json_line = json.dumps(message) + "\n"
-                        process.stdin.write(json_line.encode())
-                        await process.stdin.drain()
-                
+                        self._process.stdin.write(json_line.encode())
+                        await self._process.stdin.drain()
+
                 self.transport = MCPTransport(self.config)
                 self.transport.send = stdio_send
                 self.transport.receive = stdio_receive
             else:
                 self.transport = MCPTransport(self.config)
-            
+
             return True
         except Exception as e:
             logger.error(f"Failed to connect via stdio: {e}")
@@ -403,10 +460,44 @@ class MCPClient:
                 method="tools/list",
                 request_id=str(uuid.uuid4())
             )
-            
-            if self.transport:
+
+            if self.config.server_type == MCPServerType.STDIO and self._process:
+                # For stdio, send request and read response directly
+                import json
+                request_json = json.dumps(request.to_dict()) + "\n"
+                self._process.stdin.write(request_json.encode())
+                await self._process.stdin.drain()
+
+                # Read response
+                try:
+                    response_line = await self._process.stdout.readline()
+                    if response_line:
+                        response = json.loads(response_line.decode())
+
+                        if response and "result" in response:
+                            tools_data = response["result"].get("tools", [])
+                            self.tools = [
+                                MCPTool(
+                                    name=tool.get("name", ""),
+                                    description=tool.get("description", ""),
+                                    input_schema=tool.get("inputSchema", {})
+                                )
+                                for tool in tools_data
+                            ]
+
+                            for tool in self.tools:
+                                self._tool_cache[tool.name] = tool
+
+                            logger.info(f"Discovered {len(self.tools)} tools")
+                except json.JSONDecodeError as e:
+                    logger.error(f"Failed to parse MCP response: {e}")
+                    return
+                except Exception as e:
+                    logger.error(f"Failed to read MCP response: {e}")
+                    return
+            elif self.transport:
                 response = await self.transport.send(request.to_dict())
-                
+
                 if response and "result" in response:
                     tools_data = response["result"].get("tools", [])
                     self.tools = [
@@ -417,53 +508,15 @@ class MCPClient:
                         )
                         for tool in tools_data
                     ]
-                    
+
                     for tool in self.tools:
                         self._tool_cache[tool.name] = tool
-                    
+
                     logger.info(f"Discovered {len(self.tools)} tools")
             else:
-                self.tools = [
-                    MCPTool(
-                        name="mcp__file_read",
-                        description="Read a file from the filesystem",
-                        input_schema={
-                            "type": "object",
-                            "properties": {
-                                "path": {"type": "string", "description": "File path"}
-                            },
-                            "required": ["path"]
-                        }
-                    ),
-                    MCPTool(
-                        name="mcp__file_write",
-                        description="Write content to a file",
-                        input_schema={
-                            "type": "object",
-                            "properties": {
-                                "path": {"type": "string", "description": "File path"},
-                                "content": {"type": "string", "description": "File content"}
-                            },
-                            "required": ["path", "content"]
-                        }
-                    ),
-                    MCPTool(
-                        name="mcp__execute_command",
-                        description="Execute a shell command",
-                        input_schema={
-                            "type": "object",
-                            "properties": {
-                                "command": {"type": "string", "description": "Command to execute"}
-                            },
-                            "required": ["command"]
-                        }
-                    )
-                ]
-                
-                for tool in self.tools:
-                    self._tool_cache[tool.name] = tool
-                
-                logger.info(f"Loaded {len(self.tools)} default tools")
+                # No tools discovered, keep empty list
+                self.tools = []
+                logger.warning("No tools discovered from MCP server")
         except Exception as e:
             logger.error(f"Failed to discover tools: {e}")
     

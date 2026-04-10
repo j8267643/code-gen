@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     # Ollama (Local)
     ollama_base_url: str = Field(default="http://localhost:11434", env="OLLAMA_BASE_URL")
     ollama_model: str = Field(default="codellama", env="OLLAMA_MODEL")
+    ollama_max_tokens: int = Field(default=2048, env="OLLAMA_MAX_TOKENS", description="Max tokens for Ollama models (Ollama typically has lower limits)")
     
     # LM Studio (Local)
     lmstudio_base_url: str = Field(default="http://localhost:1234/v1", env="LMSTUDIO_BASE_URL")
@@ -141,6 +142,8 @@ class Settings(BaseSettings):
                         self.ollama_base_url = ollama['base_url']
                     if 'model' in ollama:
                         self.ollama_model = ollama['model']
+                    if 'max_tokens' in ollama:
+                        self.ollama_max_tokens = ollama['max_tokens']
                 
                 # 加载 lmstudio 配置
                 if 'lmstudio' in config_data:
@@ -177,7 +180,16 @@ class Settings(BaseSettings):
                         self.verbose = features['verbose']
                     if 'show_token_count' in features:
                         self.show_token_count = features['show_token_count']
-                
+
+                # 加载 MCP 配置
+                if 'mcp' in config_data:
+                    mcp_config = config_data['mcp']
+                    if 'servers' in mcp_config:
+                        self.mcp_servers = {}
+                        for server in mcp_config['servers']:
+                            if 'name' in server:
+                                self.mcp_servers[server['name']] = server
+
                 return
             except Exception as e:
                 print(f"Warning: Failed to load project config: {e}")
