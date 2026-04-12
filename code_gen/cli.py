@@ -462,10 +462,214 @@ def security(
     security_app(cmd_args)
 
 
+@app.command()
+def dynamic(
+    file: Path = typer.Argument(
+        ...,
+        help="Path to dynamic workflow YAML file",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+    ),
+    path: Optional[Path] = typer.Option(
+        None,
+        "--path",
+        "-w",
+        help="Working directory",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+):
+    """Run a dynamic multi-agent workflow (Agent plans its own steps)"""
+    import asyncio
+    from pathlib import Path
+    
+    work_dir = path or Path.cwd()
+    
+    # Check auth if needed
+    if settings.requires_api_key() and not settings.anthropic_api_key:
+        console.print("[red]Error: API key required[/red]")
+        sys.exit(1)
+    
+    # Import dynamic workflow loader
+    try:
+        from code_gen.agents.dynamic_yaml_loader import DynamicWorkflowLoader
+    except ImportError as e:
+        console.print(f"[red]Error: Failed to import required modules: {e}[/red]")
+        console.print("[yellow]Please ensure all dependencies are installed: pip install pyyaml httpx[/yellow]")
+        sys.exit(1)
+    
+    loader = DynamicWorkflowLoader(work_dir)
+    
+    try:
+        # Load workflow
+        console.print(f"[bold blue]Loading dynamic workflow from {file}...[/bold blue]")
+        config = loader.load(file)
+        
+        # Validate
+        errors = loader.validate(config)
+        if errors:
+            console.print("[red]Validation errors:[/red]")
+            for error in errors:
+                console.print(f"  • {error}")
+            sys.exit(1)
+        
+        console.print(f"[green]✓ Workflow loaded: {config.name}[/green]")
+        console.print(f"[dim]Description: {config.description}[/dim]")
+        console.print(f"[dim]Goal: {config.goal}[/dim]")
+        console.print(f"[dim]Strategy: {config.strategy}[/dim]")
+        console.print(f"[dim]Available Agents: {len(config.agents)}[/dim]")
+        for agent_id, agent_data in config.agents.items():
+            console.print(f"  • {agent_data.get('name', agent_id)} ({agent_data.get('role', 'unknown')})")
+        
+        # Create and run workflow
+        console.print("\n[bold green]Starting dynamic workflow...[/bold green]\n")
+        
+        async def run_dynamic():
+            # 使用支持断点续跑的工作流
+            try:
+                from code_gen.agents.enhanced_executor import EnhancedDynamicWorkflowExecutor
+                from code_gen.agents.resumable_workflow import ResumableDynamicWorkflow
+            except ImportError as e:
+                console.print(f"[red]Error: Failed to import workflow modules: {e}[/red]")
+                return None
+            
+            try:
+                executor = EnhancedDynamicWorkflowExecutor(work_dir)
+                workflow = ResumableDynamicWorkflow(config, work_dir, executor)
+                result = await workflow.run(resume=True, retry_failed=False)
+                return result
+            except Exception as e:
+                console.print(f"[red]Error running workflow: {e}[/red]")
+                import traceback
+                console.print(f"[dim]{traceback.format_exc()}[/dim]")
+                return None
+        
+        asyncio.run(run_dynamic())
+        
+    except FileNotFoundError as e:
+        console.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    except Exception as e:
+        console.print(f"[red]Error: {e}[/red]")
+        import traceback
+        console.print(f"[dim]{traceback.format_exc()}[/dim]")
+        sys.exit(1)
+
+
+@app.command()
+def workflow_resume(
+    name: Optional[str] = typer.Argument(
+        None,
+        help="Workflow name to resume (if not provided, list all resumable workflows)",
+    ),
+    path: Optional[Path] = typer.Option(
+        None,
+        "--path",
+        "-w",
+        help="Working directory",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+    ),
+    reset: bool = typer.Option(
+        False,
+        "--reset",
+        "-r",
+        help="Reset workflow state and start from beginning",
+    ),
+    retry: bool = typer.Option(
+        False,
+        "--retry",
+        "-t",
+        help="Retry failed steps",
+    ),
+):
+    """Resume a failed or paused workflow from where it left off"""
+    work_dir = path or Path.cwd()
+    
+    from code_gen.agents.resumable_workflow import WorkflowResumer
+    
+    resumer = WorkflowResumer(work_dir)
+    
+    # 如果没有指定名称，列出所有可恢复的工作流
+    if not name:
+        workflows = resumer.list_workflows()
+        
+        if not workflows:
+            console.print("[yellow]No saved workflows found[/yellow]")
+            return
+        
+        table = Table(title="Saved Workflows")
+        table.add_column("Name", style="cyan")
+        table.add_column("Status", style="green")
+        table.add_column("Start Time", style="dim")
+        
+        for wf in workflows:
+            status_color = {
+                "completed": "green",
+                "failed": "red",
+                "running": "yellow",
+                "paused": "blue"
+            }.get(wf["status"], "white")
+            
+            table.add_row(
+                wf["workflow_name"],
+                f"[{status_color}]{wf['status']}[/{status_color}]",
+                wf.get("start_time", "Unknown")[:19] if wf.get("start_time") else "Unknown"
+            )
+        
+        console.print(table)
+        return
+    
+    # 检查是否可以恢复
+    if not resumer.can_resume(name) and not reset:
+        status = resumer.get_workflow_status(name)
+        if status:
+            console.print(f"[yellow]Workflow '{name}' is {status['status']}[/yellow]")
+            console.print(f"Progress: {status['progress']}")
+            
+            if status["failed_steps"]:
+                console.print(f"\nFailed steps: {', '.join(status['failed_steps'])}")
+                console.print("\nUse --retry to retry failed steps")
+            
+            if status["status"] == "completed":
+                console.print("\nWorkflow is already completed. Use --reset to restart.")
+        else:
+            console.print(f"[red]Workflow '{name}' not found[/red]")
+        return
+    
+    # 重置工作流
+    if reset:
+        resumer.reset_workflow(name)
+        console.print(f"[green]Workflow '{name}' has been reset[/green]")
+        return
+    
+    # 恢复工作流
+    console.print(f"[bold blue]Resuming workflow: {name}[/bold blue]")
+    
+    # 加载工作流配置
+    from code_gen.agents.workflow_state import get_state_manager
+    
+    state_manager = get_state_manager(work_dir)
+    state = state_manager.load_state(name)
+    
+    if not state or not state.plan:
+        console.print(f"[red]Cannot load workflow state for '{name}'[/red]")
+        return
+    
+    # 显示当前进度
+    status = resumer.get_workflow_status(name)
+    if status:
+        console.print(f"Progress: {status['progress']}")
+        if status["pending_steps"]:
+            console.print(f"Pending steps: {len(status['pending_steps'])}")
+
+
 def main():
     """Main entry point"""
     app()
-
 
 if __name__ == "__main__":
     main()
