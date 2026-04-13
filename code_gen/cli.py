@@ -480,8 +480,25 @@ def dynamic(
         file_okay=False,
         dir_okay=True,
     ),
+    reflection: str = typer.Option(
+        "balanced",
+        "--reflection",
+        "-r",
+        help="Self-reflection mode: strict, balanced, fast, disabled",
+    ),
+    no_reflection: bool = typer.Option(
+        False,
+        "--no-reflection",
+        help="Disable self-reflection (same as --reflection disabled)",
+    ),
 ):
-    """Run a dynamic multi-agent workflow (Agent plans its own steps)"""
+    """Run a dynamic multi-agent workflow (Agent plans its own steps)
+    
+    Examples:
+        code-gen dynamic workflow.yaml
+        code-gen dynamic workflow.yaml --reflection strict
+        code-gen dynamic workflow.yaml --no-reflection
+    """
     import asyncio
     from pathlib import Path
     
@@ -491,6 +508,10 @@ def dynamic(
     if settings.requires_api_key() and not settings.anthropic_api_key:
         console.print("[red]Error: API key required[/red]")
         sys.exit(1)
+    
+    # Handle reflection settings
+    reflection_mode = "disabled" if no_reflection else reflection
+    console.print(f"[dim]Reflection mode: {reflection_mode}[/dim]")
     
     # Import dynamic workflow loader
     try:
@@ -527,18 +548,37 @@ def dynamic(
         console.print("\n[bold green]Starting dynamic workflow...[/bold green]\n")
         
         async def run_dynamic():
-            # 使用支持断点续跑的工作流
+            # 使用支持断点续跑和自反思的工作流
             try:
-                from code_gen.agents.enhanced_executor import EnhancedDynamicWorkflowExecutor
+                from code_gen.agents.enhanced_reflect_executor import EnhancedReflectiveExecutor
                 from code_gen.agents.resumable_workflow import ResumableDynamicWorkflow
+                from code_gen.agents.reflection import ReflectionPresets
             except ImportError as e:
                 console.print(f"[red]Error: Failed to import workflow modules: {e}[/red]")
                 return None
             
             try:
-                executor = EnhancedDynamicWorkflowExecutor(work_dir)
+                # 创建支持自反思的执行器
+                executor = EnhancedReflectiveExecutor(work_dir)
+                
+                # 设置反思模式
+                if reflection_mode != "disabled":
+                    executor.set_reflection_preset(reflection_mode)
+                    console.print(f"[green]✓ Self-reflection enabled ({reflection_mode} mode)[/green]")
+                else:
+                    executor.disable_reflection()
+                    console.print(f"[yellow]⚠ Self-reflection disabled[/yellow]")
+                
                 workflow = ResumableDynamicWorkflow(config, work_dir, executor)
                 result = await workflow.run(resume=True, retry_failed=False)
+                
+                # 显示反思报告
+                if reflection_mode != "disabled" and hasattr(executor, 'get_reflection_report'):
+                    report = executor.get_reflection_report()
+                    if report and report != "No reflection history":
+                        console.print("\n[bold cyan]Reflection Report:[/bold cyan]")
+                        console.print(f"[dim]{report}[/dim]")
+                
                 return result
             except Exception as e:
                 console.print(f"[red]Error running workflow: {e}[/red]")

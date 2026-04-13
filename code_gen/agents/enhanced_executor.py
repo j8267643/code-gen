@@ -37,7 +37,8 @@ class EnhancedAgentExecutor(AgentExecutor):
         agent: Agent,
         system_prompt: str,
         user_prompt: str,
-        tools: List[Dict] = None
+        tools: List[Dict] = None,
+        **kwargs
     ) -> Dict[str, Any]:
         """
         执行 Agent 任务 - 支持工具调用
@@ -47,6 +48,13 @@ class EnhancedAgentExecutor(AgentExecutor):
         2. 调用 AI
         3. 如果 AI 请求工具调用，执行工具并返回结果
         4. 重复直到任务完成或达到最大迭代次数
+        
+        Args:
+            agent: 执行的 Agent
+            system_prompt: 系统提示词
+            user_prompt: 用户提示词
+            tools: 可用工具列表
+            **kwargs: 额外参数（用于子类扩展）
         """
         try:
             # 构建增强的系统提示词

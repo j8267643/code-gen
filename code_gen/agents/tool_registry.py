@@ -12,6 +12,12 @@ from code_gen.tools.shell import ExecuteCommandTool, ViewDirectoryTreeTool
 from code_gen.tools.search import SearchFilesTool, GetFileInfoTool
 from code_gen.tools.git import GitStatusTool, GitDiffTool, GitLogTool
 
+# PraisonAI-inspired tools
+from code_gen.tools.web import DuckDuckGoSearchTool, TavilySearchTool, WebFetchTool, WebCrawlTool
+from code_gen.tools.code import PythonExecuteTool, CalculatorTool, CodeAnalyzerTool
+from code_gen.tools.api import APICallTool, WeatherTool, WikipediaTool
+from code_gen.tools.database import DuckDBQueryTool, SQLiteQueryTool, CSVQueryTool
+
 
 class ToolRegistry:
     """
@@ -32,16 +38,37 @@ class ToolRegistry:
     def _register_default_tools(self):
         """注册默认工具"""
         default_tools = [
+            # File operations
             ReadFileTool(),
             WriteFileTool(),
             ListDirectoryTool(),
+            # Shell operations
             ExecuteCommandTool(),
             ViewDirectoryTreeTool(),
+            # Search
             SearchFilesTool(),
             GetFileInfoTool(),
+            # Git
             GitStatusTool(),
             GitDiffTool(),
             GitLogTool(),
+            # Web search (PraisonAI-inspired)
+            DuckDuckGoSearchTool(),
+            TavilySearchTool(),
+            WebFetchTool(),
+            WebCrawlTool(),
+            # Code execution (PraisonAI-inspired)
+            PythonExecuteTool(),
+            CalculatorTool(),
+            CodeAnalyzerTool(),
+            # API calls (PraisonAI-inspired)
+            APICallTool(),
+            WeatherTool(),
+            WikipediaTool(),
+            # Database (PraisonAI-inspired)
+            DuckDBQueryTool(),
+            SQLiteQueryTool(),
+            CSVQueryTool(),
         ]
         
         for tool in default_tools:
