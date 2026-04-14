@@ -12,7 +12,7 @@ import re
 from rich.console import Console
 
 from code_gen.memory import MemorySystem, Memory, MemoryType
-from code_gen.client import ClaudeClient
+from code_gen.client import AIClient
 
 console = Console()
 

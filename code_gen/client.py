@@ -39,7 +39,7 @@ class BaseAIClient(ABC):
 
 
 class AnthropicClient(BaseAIClient):
-    """Anthropic Claude client"""
+    """Anthropic API client"""
     
     def __init__(self, api_key: Optional[str] = None):
         self.api_key = api_key or settings.anthropic_api_key
@@ -77,7 +77,7 @@ class AnthropicClient(BaseAIClient):
             return content.text
             
         except Exception as e:
-            console.print(f"[red]Error calling Claude API: {e}[/red]")
+            console.print(f"[red]Error calling Anthropic API: {e}[/red]")
             raise
     
     async def stream_message(
@@ -99,7 +99,7 @@ class AnthropicClient(BaseAIClient):
                     yield text
                     
         except Exception as e:
-            console.print(f"[red]Error streaming from Claude API: {e}[/red]")
+            console.print(f"[red]Error streaming from Anthropic API: {e}[/red]")
             raise
 
 
@@ -521,7 +521,7 @@ class OpenAICompatibleClient(BaseAIClient):
             raise
 
 
-class ClaudeClient:
+class AIClient:
     """Factory for creating appropriate AI client"""
     
     def __new__(cls, *args, **kwargs):
@@ -546,3 +546,7 @@ class ClaudeClient:
             return OpenAICompatibleClient(*args, **kwargs)
         else:
             raise ValueError(f"Unknown provider: {provider}")
+
+
+# 保持向后兼容的别名
+ClaudeClient = AIClient

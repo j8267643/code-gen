@@ -15,7 +15,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 
-from code_gen.client import ClaudeClient
+from code_gen.client import AIClient
 from code_gen.session import SessionManager
 from code_gen.tools.files import FileTools
 from code_gen.tools.shell import ShellTools
@@ -43,7 +43,7 @@ class CodeGenApp:
         self.skill_system = None
 
         # Initialize client first
-        self.client = ClaudeClient()
+        self.client = AIClient()
 
         # Available tools
         self.tools = (
@@ -320,7 +320,7 @@ use the write_file tool to save it to a memory file."""
         try:
             # Use existing client from __init__
             if not hasattr(self, 'client') or self.client is None:
-                self.client = ClaudeClient()
+                self.client = AIClient()
             
             console.print("[dim]Type 'exit' or press Ctrl+C to quit[/dim]\n")
             
