@@ -217,26 +217,44 @@ class SelfReflection:
             # 提取 JSON
             json_match = self._extract_json(content)
             if json_match:
-                data = json.loads(json_match)
-                
+                try:
+                    data = json.loads(json_match)
+                    
+                    return ReflectionResult(
+                        passed=data.get("passed", False),
+                        score=float(data.get("score", 0)),
+                        feedback=data.get("feedback", ""),
+                        suggestions=data.get("suggestions", []),
+                        missing_aspects=data.get("missing_aspects", []),
+                        quality_issues=data.get("quality_issues", [])
+                    )
+                except (json.JSONDecodeError, ValueError, TypeError) as e:
+                    # JSON 解析失败（包括格式错误、类型错误等）
+                    return ReflectionResult(
+                        passed=False,
+                        score=0.0,
+                        feedback=f"Invalid JSON format: {str(e)[:100]}",
+                        suggestions=["Please provide valid JSON with proper syntax"],
+                        quality_issues=[f"JSON parsing error: {str(e)[:100]}"]
+                    )
+            else:
+                # 未找到 JSON
                 return ReflectionResult(
-                    passed=data.get("passed", False),
-                    score=float(data.get("score", 0)),
-                    feedback=data.get("feedback", ""),
-                    suggestions=data.get("suggestions", []),
-                    missing_aspects=data.get("missing_aspects", []),
-                    quality_issues=data.get("quality_issues", [])
+                    passed=False,
+                    score=0.0,
+                    feedback="No JSON found in response",
+                    suggestions=["Please wrap your response in ```json ... ``` format"],
+                    quality_issues=["Response does not contain valid JSON block"]
                 )
         except Exception as e:
-            pass
-        
-        # 解析失败，返回默认结果
-        return ReflectionResult(
-            passed=False,
-            score=0.0,
-            feedback=f"Failed to parse reflection: {content[:200]}",
-            suggestions=["Please provide output in valid JSON format"]
-        )
+            # 其他异常（如 _extract_json 失败）
+            return ReflectionResult(
+                passed=False,
+                score=0.0,
+                feedback=f"Failed to extract JSON: {str(e)[:100]}",
+                suggestions=["Please check your response format"],
+                quality_issues=[f"Extraction error: {str(e)[:100]}"]
+            )
     
     def _extract_json(self, text: str) -> Optional[str]:
         """从文本中提取 JSON"""
