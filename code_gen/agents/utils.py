@@ -382,6 +382,221 @@ def generate_id(prefix: str = "") -> str:
     return f"{prefix}{timestamp}_{random_suffix}"
 
 
+# ========== 原子写入工具（来自 GSD-2） ==========
+
+import os
+import tempfile
+from pathlib import Path
+
+def atomic_write_file(
+    file_path: str,
+    content: str,
+    encoding: str = 'utf-8',
+    mode: int = 0o644
+) -> None:
+    """
+    原子写入文件
+    
+    先写入临时文件，然后重命名到目标文件，确保写入操作的原子性。
+    防止写入过程中断导致文件损坏。
+    
+    Args:
+        file_path: 目标文件路径
+        content: 文件内容
+        encoding: 文件编码
+        mode: 文件权限（Unix）
+    
+    Raises:
+        IOError: 写入失败
+    
+    Example:
+        >>> atomic_write_file("config.json", '{"key": "value"}')
+    """
+    path = Path(file_path)
+    
+    # 确保目录存在
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # 创建临时文件
+    tmp_fd, tmp_path = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix='.tmp'
+    )
+    
+    try:
+        # 写入临时文件
+        with os.fdopen(tmp_fd, 'w', encoding=encoding) as f:
+            f.write(content)
+        
+        # 设置权限（Unix）
+        if os.name != 'nt':  # 非 Windows
+            os.chmod(tmp_path, mode)
+        
+        # 原子重命名
+        os.replace(tmp_path, path)
+        
+    except Exception as e:
+        # 清理临时文件
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except:
+            pass
+        raise IOError(f"原子写入失败 {file_path}: {e}")
+
+
+def atomic_write_json(
+    file_path: str,
+    data: Any,
+    indent: int = 2,
+    encoding: str = 'utf-8'
+) -> None:
+    """
+    原子写入 JSON 文件
+    
+    Args:
+        file_path: 目标文件路径
+        data: 要写入的数据
+        indent: JSON 缩进
+        encoding: 文件编码
+    
+    Example:
+        >>> atomic_write_json("data.json", {"key": "value"})
+    """
+    content = json.dumps(data, indent=indent, ensure_ascii=False)
+    atomic_write_file(file_path, content, encoding)
+
+
+async def async_atomic_write_file(
+    file_path: str,
+    content: str,
+    encoding: str = 'utf-8',
+    mode: int = 0o644
+) -> None:
+    """
+    异步原子写入文件
+    
+    Args:
+        file_path: 目标文件路径
+        content: 文件内容
+        encoding: 文件编码
+        mode: 文件权限（Unix）
+    """
+    # 在后台线程执行同步写入
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(
+        None,
+        atomic_write_file,
+        file_path,
+        content,
+        encoding,
+        mode
+    )
+
+
+# ========== 文件锁工具（来自 GSD-2，跨平台） ==========
+
+import platform
+
+# 平台检测
+_IS_WINDOWS = platform.system() == 'Windows'
+
+if not _IS_WINDOWS:
+    import fcntl
+
+def acquire_file_lock(lock_path: str, timeout: float = 10.0) -> bool:
+    """
+    获取文件锁（跨平台）
+    
+    Args:
+        lock_path: 锁文件路径
+        timeout: 超时时间（秒）
+    
+    Returns:
+        是否成功获取锁
+    
+    Example:
+        >>> if acquire_file_lock("/tmp/mylock"):
+        ...     try:
+        ...         # 执行需要互斥的操作
+        ...         pass
+        ...     finally:
+        ...         release_file_lock("/tmp/mylock")
+    """
+    start_time = time.time()
+    
+    # Windows 使用简单的文件存在检查
+    if _IS_WINDOWS:
+        while time.time() - start_time < timeout:
+            try:
+                # 尝试创建锁文件（如果不存在）
+                if not os.path.exists(lock_path):
+                    with open(lock_path, 'w') as f:
+                        f.write(str(os.getpid()))
+                    return True
+            except (IOError, OSError):
+                pass
+            time.sleep(0.1)
+        return False
+    
+    # Unix 使用 fcntl
+    while time.time() - start_time < timeout:
+        try:
+            fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return True
+        except (IOError, OSError):
+            time.sleep(0.1)
+    
+    return False
+
+
+def release_file_lock(lock_path: str) -> None:
+    """
+    释放文件锁（跨平台）
+    
+    Args:
+        lock_path: 锁文件路径
+    """
+    try:
+        if _IS_WINDOWS:
+            # Windows 直接删除锁文件
+            if os.path.exists(lock_path):
+                os.unlink(lock_path)
+        else:
+            # Unix 使用 fcntl
+            fd = os.open(lock_path, os.O_RDWR)
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+            os.unlink(lock_path)
+    except:
+        pass
+
+
+# ========== 上下文管理器 ==========
+
+from contextlib import contextmanager
+
+@contextmanager
+def file_lock_context(lock_path: str, timeout: float = 10.0):
+    """
+    文件锁上下文管理器
+    
+    Example:
+        >>> with file_lock_context("/tmp/mylock"):
+        ...     # 执行需要互斥的操作
+        ...     pass
+    """
+    if not acquire_file_lock(lock_path, timeout):
+        raise TimeoutError(f"无法获取文件锁: {lock_path}")
+    
+    try:
+        yield
+    finally:
+        release_file_lock(lock_path)
+
+
 # 全局实例
 performance_monitor = PerformanceMonitor()
 cache = SimpleCache()

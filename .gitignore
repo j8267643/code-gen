@@ -44,3 +44,4 @@ memories/
 
 # Code Gen local data
 .code_gen/
+.agent/

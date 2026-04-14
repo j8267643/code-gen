@@ -228,14 +228,23 @@ class SelfReflection:
                         missing_aspects=data.get("missing_aspects", []),
                         quality_issues=data.get("quality_issues", [])
                     )
-                except (json.JSONDecodeError, ValueError, TypeError) as e:
-                    # JSON 解析失败（包括格式错误、类型错误等）
+                except json.JSONDecodeError as e:
+                    # JSON 语法错误
                     return ReflectionResult(
                         passed=False,
                         score=0.0,
-                        feedback=f"Invalid JSON format: {str(e)[:100]}",
+                        feedback=f"JSON syntax error: {str(e)[:100]}",
                         suggestions=["Please provide valid JSON with proper syntax"],
-                        quality_issues=[f"JSON parsing error: {str(e)[:100]}"]
+                        quality_issues=[f"JSON syntax error: {str(e)[:100]}"]
+                    )
+                except (ValueError, TypeError) as e:
+                    # 数据类型错误
+                    return ReflectionResult(
+                        passed=False,
+                        score=0.0,
+                        feedback=f"JSON data error: {str(e)[:100]}",
+                        suggestions=["Please check data types in JSON"],
+                        quality_issues=[f"Data type error: {str(e)[:100]}"]
                     )
             else:
                 # 未找到 JSON

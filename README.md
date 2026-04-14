@@ -216,7 +216,7 @@ code_gen/
 
 ## 🔧 配置
 
-配置文件位于 `~/.claude_code/` 目录，包含：
+配置文件位于 `~/.code_gen/` 目录，包含：
 
 - `config.json` - 主配置文件
 - `providers.json` - 提供商配置
@@ -226,7 +226,7 @@ code_gen/
 ### Ollama 配置示例
 
 ```yaml
-# ~/.claude_code/config.yaml
+# ~/.code_gen/config.yaml
 ollama:
   model: qwen2.5
   base_url: http://localhost:11434

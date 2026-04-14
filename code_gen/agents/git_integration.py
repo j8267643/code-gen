@@ -38,6 +38,54 @@ class GitOperationStatus(str, Enum):
     NO_CHANGES = "no_changes"
 
 
+class GitOperationRisk(str, Enum):
+    """Git 操作风险级别"""
+    SAFE = "safe"           # 安全操作（只读或本地修改）
+    NORMAL = "normal"       # 常规操作（需要确认）
+    DANGEROUS = "dangerous" # 危险操作（需要额外确认）
+    DESTRUCTIVE = "destructive"  # 破坏性操作（强烈警告）
+
+
+# Git 操作风险分类
+GIT_OPERATION_RISKS: Dict[str, GitOperationRisk] = {
+    # 安全操作 - 只读或本地修改
+    "status": GitOperationRisk.SAFE,
+    "log": GitOperationRisk.SAFE,
+    "diff": GitOperationRisk.SAFE,
+    "show": GitOperationRisk.SAFE,
+    "ls-files": GitOperationRisk.SAFE,
+    "ls-remote": GitOperationRisk.SAFE,
+    "config": GitOperationRisk.SAFE,
+    
+    # 常规操作 - 本地版本控制
+    "add": GitOperationRisk.NORMAL,
+    "commit": GitOperationRisk.NORMAL,
+    "branch": GitOperationRisk.NORMAL,
+    "checkout": GitOperationRisk.NORMAL,
+    "switch": GitOperationRisk.NORMAL,
+    "stash": GitOperationRisk.NORMAL,
+    "tag": GitOperationRisk.NORMAL,
+    "fetch": GitOperationRisk.NORMAL,
+    
+    # 危险操作 - 影响远程或历史
+    "push": GitOperationRisk.DANGEROUS,
+    "pull": GitOperationRisk.DANGEROUS,
+    "merge": GitOperationRisk.DANGEROUS,
+    "rebase": GitOperationRisk.DANGEROUS,
+    "cherry-pick": GitOperationRisk.DANGEROUS,
+    "revert": GitOperationRisk.DANGEROUS,
+    "bisect": GitOperationRisk.DANGEROUS,
+    
+    # 破坏性操作 - 可能丢失数据
+    "reset": GitOperationRisk.DESTRUCTIVE,
+    "clean": GitOperationRisk.DESTRUCTIVE,
+    "rm": GitOperationRisk.DESTRUCTIVE,
+    "mv": GitOperationRisk.DESTRUCTIVE,
+    "filter-branch": GitOperationRisk.DESTRUCTIVE,
+    "filter-repo": GitOperationRisk.DESTRUCTIVE,
+}
+
+
 @dataclass
 class GitConfig:
     """Git 集成配置"""
@@ -60,16 +108,122 @@ class GitConfig:
     # 安全设置
     require_clean_working_tree: bool = False
     allowed_operations: List[str] = field(default_factory=lambda: [
-        "status", "add", "commit", "log", "diff", "branch"
+        "status", "add", "commit", "log", "diff", "branch", "fetch"
     ])
+    
+    # 风险级别配置 - 允许的操作风险级别
+    max_allowed_risk: GitOperationRisk = GitOperationRisk.NORMAL
     
     # 仓库设置
     repo_path: Optional[Path] = None
     git_executable: str = "git"
     
     def __post_init__(self):
+        # 处理 auto_commit 字符串类型
         if isinstance(self.auto_commit, str):
-            self.auto_commit = GitAutoCommitMode(self.auto_commit)
+            try:
+                self.auto_commit = GitAutoCommitMode(self.auto_commit)
+            except ValueError as e:
+                raise ValueError(
+                    f"GitConfig: 无效的 auto_commit 值 '{self.auto_commit}'。"
+                    f"可选值: {[m.value for m in GitAutoCommitMode]}"
+                ) from e
+        
+        # 处理 max_allowed_risk 字符串类型
+        if isinstance(self.max_allowed_risk, str):
+            try:
+                self.max_allowed_risk = GitOperationRisk(self.max_allowed_risk)
+            except ValueError as e:
+                raise ValueError(
+                    f"GitConfig: 无效的 max_allowed_risk 值 '{self.max_allowed_risk}'。"
+                    f"可选值: {[r.value for r in GitOperationRisk]}"
+                ) from e
+        
+        # 安全验证：检查操作风险级别
+        risk_levels = {
+            GitOperationRisk.SAFE: 0,
+            GitOperationRisk.NORMAL: 1,
+            GitOperationRisk.DANGEROUS: 2,
+            GitOperationRisk.DESTRUCTIVE: 3
+        }
+        
+        max_risk_level = risk_levels.get(self.max_allowed_risk, 1)
+        
+        for op in self.allowed_operations:
+            try:
+                op_lower = op.lower()
+                risk = GIT_OPERATION_RISKS.get(op_lower, GitOperationRisk.NORMAL)
+                risk_level = risk_levels.get(risk, 1)
+                
+                if risk_level > max_risk_level:
+                    raise ValueError(
+                        f"GitConfig: 操作 '{op}' 的风险级别为 '{risk.value}'，"
+                        f"超过了最大允许风险级别 '{self.max_allowed_risk.value}'。"
+                        f"请调整 max_allowed_risk 或从 allowed_operations 中移除该操作。"
+                    )
+            except Exception as e:
+                if isinstance(e, ValueError):
+                    raise
+                raise ValueError(
+                    f"GitConfig: 验证操作 '{op}' 时发生错误: {str(e)}"
+                ) from e
+        
+        # 验证 repo_path
+        if self.repo_path:
+            if not self.repo_path.exists():
+                raise ValueError(
+                    f"GitConfig: repo_path '{self.repo_path}' 不存在"
+                )
+            
+            git_dir = self.repo_path / ".git"
+            if not git_dir.exists():
+                raise ValueError(
+                    f"GitConfig: repo_path '{self.repo_path}' 不是有效的 Git 仓库"
+                )
+        
+        # 验证 git_executable
+        if self.git_executable != "git":
+            # 检查自定义路径是否存在且可执行
+            exe_path = Path(self.git_executable)
+            if not exe_path.exists():
+                raise ValueError(
+                    f"GitConfig: git_executable '{self.git_executable}' 不存在"
+                )
+            
+            # Windows 下检查 .exe 扩展名
+            import sys
+            if sys.platform == "win32" and not exe_path.suffix:
+                exe_path = exe_path.with_suffix(".exe")
+                if not exe_path.exists():
+                    raise ValueError(
+                        f"GitConfig: git_executable '{exe_path}' 不存在"
+                    )
+    
+    def is_operation_allowed(self, operation: str) -> bool:
+        """检查操作是否被允许"""
+        op_lower = operation.lower()
+        
+        # 检查是否在允许列表中
+        if op_lower not in [op.lower() for op in self.allowed_operations]:
+            return False
+        
+        # 检查风险级别
+        risk = GIT_OPERATION_RISKS.get(op_lower, GitOperationRisk.NORMAL)
+        risk_levels = {
+            GitOperationRisk.SAFE: 0,
+            GitOperationRisk.NORMAL: 1,
+            GitOperationRisk.DANGEROUS: 2,
+            GitOperationRisk.DESTRUCTIVE: 3
+        }
+        
+        max_risk_level = risk_levels.get(self.max_allowed_risk, 1)
+        op_risk_level = risk_levels.get(risk, 1)
+        
+        return op_risk_level <= max_risk_level
+    
+    def get_operation_risk(self, operation: str) -> GitOperationRisk:
+        """获取操作的风险级别"""
+        return GIT_OPERATION_RISKS.get(operation.lower(), GitOperationRisk.NORMAL)
 
 
 @dataclass
