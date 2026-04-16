@@ -9,7 +9,7 @@ import json
 import asyncio
 
 from code_gen.agents.unified_agent import UnifiedAgent, UnifiedAgentConfig
-from code_gen.agents.agent import Agent
+from code_gen.agents.agent import Agent, AgentRole
 from code_gen.agents.memory import MemorySystem
 from code_gen.agents.git_integration import GitIntegration, GitConfig
 from code_gen.client import AIClient
@@ -114,7 +114,18 @@ class AutoDevIntegration:
             enable_git=self.config.auto_commit,
             verbose=True
         )
-        self.agent = UnifiedAgent(Agent(), agent_cfg)
+        # 创建基础 Agent
+        base_agent = Agent(
+            name="AutoDevExecutor",
+            role=AgentRole.BUILDER,
+            goal="执行用户故事并实现功能",
+            instructions="""你是一个高效的开发者，负责执行用户故事。
+- 理解用户故事的描述和验收标准
+- 编写清晰、可维护的代码
+- 确保代码符合项目规范
+- 完成后提交更改"""
+        )
+        self.agent = UnifiedAgent(base_agent, agent_cfg)
         
         # 初始化 Git 集成
         if self.config.auto_commit:
