@@ -282,8 +282,12 @@ async def test_error_recovery():
     return True
 
 
-async def run_all_tests():
-    """运行所有测试"""
+async def test_all_features():
+    """运行所有测试 - test_all_features 入口"""
+    return await _run_all_tests()
+
+
+async def _run_all_tests():
     print("\n" + "🚀" * 30)
     print("开始综合功能测试")
     print("🚀" * 30)
@@ -335,4 +339,4 @@ async def run_all_tests():
 
 
 if __name__ == "__main__":
-    asyncio.run(run_all_tests())
+    asyncio.run(test_all_features())

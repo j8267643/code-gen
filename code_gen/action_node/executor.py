@@ -200,22 +200,16 @@ class ActionExecutor:
         """调用 LLM"""
         if not self.llm_client:
             raise ValueError("No LLM client configured")
-        
+
         # 构建消息
         messages = [{"role": "user", "content": prompt}]
-        
-        # 添加系统提示
-        if action.system_prompt:
-            messages.insert(0, {"role": "system", "content": action.system_prompt})
-        
-        # 调用 LLM
+
+        # 调用 LLM（适配 BaseAIClient 接口）
         response = await self.llm_client.send_message(
             messages=messages,
-            model=action.model,
-            temperature=action.temperature,
-            max_tokens=action.max_tokens,
+            system=action.system_prompt or None,
         )
-        
+
         return response
     
     async def execute_batch(

@@ -94,5 +94,10 @@ async def demo_skills():
     print("3. 执行结果 -> 返回给用户")
 
 
+async def test_skills_demo():
+    """技能系统演示 - test_skills_demo 入口"""
+    return await demo_skills()
+
+
 if __name__ == "__main__":
-    asyncio.run(demo_skills())
+    asyncio.run(test_skills_demo())

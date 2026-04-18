@@ -32,3 +32,14 @@ else:
     print("No MCP section found")
 
 print("\nDone!")
+
+
+async def test_startup():
+    """测试启动 - test_startup 入口"""
+    # 测试已完成在模块加载时
+    pass
+
+
+if __name__ == "__main__":
+    import asyncio
+    asyncio.run(test_startup())

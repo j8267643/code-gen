@@ -248,5 +248,10 @@ async def main():
     print("   5. 持续重试直到成功或达到最大尝试次数")
 
 
+async def test_resilient_demo():
+    """弹性执行演示 - test_resilient_demo 入口"""
+    return await main()
+
+
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(test_resilient_demo())

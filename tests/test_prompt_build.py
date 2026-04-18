@@ -45,5 +45,10 @@ async def test_prompt():
     print("="*50)
     print("\n".join(lines))
 
+async def test_prompt_build():
+    """测试提示构建 - test_prompt_build 入口"""
+    return await test_prompt()
+
+
 if __name__ == "__main__":
-    asyncio.run(test_prompt())
+    asyncio.run(test_prompt_build())

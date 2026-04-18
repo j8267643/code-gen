@@ -507,11 +507,11 @@ def calculate_fibonacci(n: int) -> int:
         print("="*70)
 
 
-async def main():
-    """主函数"""
+async def test_complete_system():
+    """运行所有测试 - test_complete_system 入口"""
     runner = SystemTestRunner()
     await runner.run_all_tests()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    asyncio.run(test_complete_system())
