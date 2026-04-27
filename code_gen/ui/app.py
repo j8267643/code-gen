@@ -145,7 +145,8 @@ class CodeGenApp:
             # Use SimpleAgent (with V2 features)
             agent = SimpleAgent(
                 client=self.client,
-                tools=self.tools
+                tools=self.tools,
+                work_dir=os.getcwd()
             )
             
             result = await agent.process(user_input, os.getcwd())

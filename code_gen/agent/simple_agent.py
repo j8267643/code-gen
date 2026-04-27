@@ -63,14 +63,14 @@ class SimpleAgent:
     - Only ask LLM when needed
     """
     
-    def __init__(self, client, tools, system_prompt=None, max_iterations: int = 30):
+    def __init__(self, client, tools, system_prompt=None, max_iterations: int = 30, work_dir: str = "."):
         self.client = client
         self.tool_registry = ToolRegistry()
         for tool in tools:
             self.tool_registry.register(tool)
         
         # Create smart executor for direct execution with iteration budget
-        self.executor = SmartExecutor(self.tool_registry, client, max_iterations=max_iterations)
+        self.executor = SmartExecutor(self.tool_registry, client, max_iterations=max_iterations, work_dir=work_dir)
         
         self.system_prompt = system_prompt or "You are a helpful coding assistant."
     

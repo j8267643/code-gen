@@ -9,6 +9,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 from urllib.parse import quote
 
+import aiohttp
+from aiohttp import ClientError, ClientConnectorError
+
 from code_gen.tools.base import ToolResult
 from code_gen.agent.iteration_budget import IterationBudget
 from code_gen.ui.cli_ui import (
@@ -29,14 +32,53 @@ class SmartExecutor:
     - 直接执行工具
     - 只在复杂推理时才问 LLM
     - 使用迭代预算管理调用次数
+    - 使用记忆系统保持对话上下文
     """
     
-    def __init__(self, tool_registry, llm_client, max_iterations: int = 30):
+    def __init__(self, tool_registry, llm_client, max_iterations: int = 30, work_dir: Optional[str] = None):
         self.tools = tool_registry
         self.llm = llm_client
         self.project_root = ""
         self.max_iterations = max_iterations
         self.budget: Optional[IterationBudget] = None
+        self.work_dir = work_dir or "."
+        
+        # 初始化记忆系统
+        self._init_memory()
+    
+    def _init_memory(self):
+        """初始化记忆系统"""
+        try:
+            # 直接导入 memory 模块，避免通过 agents 包导入（因为 agents 包有循环依赖）
+            import sys
+            from pathlib import Path
+            
+            # 手动导入 memory 模块
+            memory_path = Path(__file__).parent.parent / "agents" / "memory.py"
+            if memory_path.exists():
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("memory", memory_path)
+                memory_module = importlib.util.module_from_spec(spec)
+                sys.modules["memory"] = memory_module
+                spec.loader.exec_module(memory_module)
+                
+                AgentMemory = memory_module.AgentMemory
+                MemoryConfig = memory_module.MemoryConfig
+                StorageBackend = memory_module.StorageBackend
+                
+                config = MemoryConfig(
+                    backend=StorageBackend.FILE,
+                    storage_path=Path(self.work_dir) / ".code_gen" / "memory",
+                    user_id="smart_executor",
+                    auto_promote=True,
+                    importance_threshold=0.7
+                )
+                self.memory = AgentMemory(config)
+            else:
+                self.memory = None
+        except Exception as e:
+            print_warning(f"记忆系统初始化失败: {e}")
+            self.memory = None
         
     async def execute(self, user_input: str, project_root: str) -> str:
         """执行用户请求"""
@@ -96,16 +138,8 @@ class SmartExecutor:
             if cmd:
                 return {"type": "execute_command", "command": cmd}
         
-        # 本地搜索
-        if any(kw in text for kw in ["搜索", "查找", "search", "find", "grep"]):
-            query = self._extract_query(user_input)
-            return {"type": "search", "query": query}
-        
-        # 网络搜索/上网查询
-        if any(kw in text for kw in ["上网", "网络", "网站", "网页", "浏览", "查询价格", "查价格", "官网", "apple.com", "iphone", "价格"]):
-            return {"type": "web_search", "query": user_input}
-        
-        # 默认聊天
+        # 默认聊天 - 让 LLM 自主决定是否需要搜索
+        # 不再通过硬编码关键词判断，而是在 _chat 方法中由 LLM 决定
         return {"type": "chat"}
     
     def _extract_path(self, text: str) -> Optional[str]:
@@ -281,9 +315,7 @@ class SmartExecutor:
     
     async def _test_services(self, info: Dict, path: str):
         """测试服务是否正常运行 - 带重试机制"""
-        import aiohttp
-        import asyncio
-        
+
         async def test_port_with_retry(name: str, port: int, project_type: str = "", max_retries: int = 3, delay: float = 2.0):
             """测试单个端口，带重试"""
             # 根据项目类型选择测试路径
@@ -293,10 +325,10 @@ class SmartExecutor:
                 test_paths = ["/", "/health"]
             else:
                 test_paths = ["/"]
-            
+
             for test_path in test_paths:
                 url = f"http://localhost:{port}{test_path}"
-                
+
                 for attempt in range(max_retries):
                     try:
                         timeout = aiohttp.ClientTimeout(total=3)
@@ -309,7 +341,7 @@ class SmartExecutor:
                                     # 有响应就算成功
                                     print_success(f"   ✓ {name} (端口 {port}): 有响应 (状态码 {response.status})")
                                     return True
-                    except aiohttp.ClientError:
+                    except (ClientError, ClientConnectorError, asyncio.TimeoutError) as e:
                         if attempt < max_retries - 1:
                             print_info(f"   ⏳ {name} (端口 {port}): 等待服务启动... ({attempt + 1}/{max_retries})")
                             await asyncio.sleep(delay)
@@ -318,7 +350,7 @@ class SmartExecutor:
                     except Exception as e:
                         print_warning(f"   ⚠ {name} (端口 {port}): 测试失败 - {e}")
                         return False
-                
+
             print_error(f"   ✗ {name} (端口 {port}): 无法连接")
             return False
         
@@ -426,10 +458,158 @@ class SmartExecutor:
         return "Search tool not available"
     
     async def _chat(self, message: str) -> str:
-        """普通聊天 - 需要 LLM"""
-        return await self.llm.send_message(
-            messages=[{"role": "user", "content": message}]
-        )
+        """普通聊天 - 带记忆和工具调用"""
+
+        # 1. 保存用户消息到记忆
+        if self.memory:
+            self.memory.store_short_term(f"用户: {message}", importance=0.6)
+
+        # 2. 构建系统提示，告知 LLM 可用工具
+        system_prompt = """你是一个智能助手。你可以使用以下工具来获取信息：
+
+可用工具：
+1. web_search - 网络搜索（用于获取实时信息如天气、价格、新闻等）
+2. web_fetch - 获取网页内容
+
+当你需要实时信息时，请使用工具。格式：
+<tool>web_search</tool>
+<query>搜索内容</query>
+
+或者直接回答用户问题。"""
+
+        # 3. 构建消息
+        messages = [{"role": "system", "content": system_prompt}]
+
+        # 添加历史记忆
+        if self.memory:
+            short_term = self.memory.get_short_term(limit=5)
+            if short_term:
+                history = "\n".join([f"- {mem.content}" for mem in short_term])
+                messages.append({
+                    "role": "system",
+                    "content": f"对话历史:\n{history}"
+                })
+
+        messages.append({"role": "user", "content": message})
+
+        # 4. 第一次调用 LLM
+        response = await self.llm.send_message(messages=messages)
+        print_info(f"LLM first response: {response[:200]}...")
+
+        # 5. 检查是否需要使用工具
+        if "<tool>web_search</tool>" in response or "<tool>web_fetch</tool>" in response:
+            print_info("Tool call detected, executing...")
+            # 提取工具调用
+            tool_result = await self._execute_tool_from_response(response)
+            print_info(f"Tool result length: {len(tool_result)}")
+
+            # 截断过长的结果
+            max_tool_result = 2000
+            if len(tool_result) > max_tool_result:
+                tool_result = tool_result[:max_tool_result] + "\n... (内容已截断)"
+                print_info(f"Truncated tool result to {max_tool_result} chars")
+
+            # 构建新的对话：系统提示 + 用户问题 + 工具结果
+            final_messages = [
+                {"role": "system", "content": "你是一个智能助手。基于提供的搜索结果回答用户问题。"},
+                {"role": "user", "content": f"用户问题: {message}\n\n搜索结果:\n{tool_result}\n\n请基于以上搜索结果回答用户的问题。"}
+            ]
+            print_info("Calling LLM with tool results...")
+
+            # 再次调用 LLM
+            response = await self.llm.send_message(messages=final_messages)
+            print_info(f"Final response length: {len(response)}")
+
+        # 6. 保存回复到记忆
+        if self.memory:
+            self.memory.store_short_term(f"助手: {response}", importance=0.6)
+
+        return response
+
+    async def _execute_tool_from_response(self, response: str) -> str:
+        """从 LLM 响应中提取并执行工具调用"""
+        import re
+
+        # 提取 web_search 调用
+        search_match = re.search(r'<tool>web_search</tool>\s*<query>(.*?)</query>', response, re.DOTALL)
+        if search_match:
+            query = search_match.group(1).strip()
+            print_info(f"LLM requested search: {query}")
+            # 只获取原始搜索结果，不调用 LLM 分析
+            result = await self._get_search_results(query)
+            return result
+
+        # 提取 web_fetch 调用
+        fetch_match = re.search(r'<tool>web_fetch</tool>\s*<url>(.*?)</url>', response, re.DOTALL)
+        if fetch_match:
+            url = fetch_match.group(1).strip()
+            print_info(f"LLM requested fetch: {url}")
+            fetch_tool = self.tools.get("web_fetch")
+            if fetch_tool:
+                result = await fetch_tool.execute(url=url)
+                return result.content if result.success else result.error
+            return "Web fetch tool not available"
+
+        return "No tool executed"
+
+    async def _get_search_results(self, query: str) -> str:
+        """获取原始搜索结果（不调用 LLM 分析）"""
+        print_info(f"Getting search results for: {query}")
+
+        try:
+            # 执行搜索 - 优先使用 Tavily
+            search_tool = None
+            tavily_tool = self.tools.get("tavily_search")
+            if tavily_tool and hasattr(tavily_tool, 'api_key') and tavily_tool.api_key:
+                search_tool = tavily_tool
+                print_info("Using Tavily search")
+
+            if not search_tool:
+                search_tool = self.tools.get("duckduckgo_search")
+                if not search_tool:
+                    return "Search tool not available"
+                print_info("Using DuckDuckGo search")
+
+            print_info("Executing search...")
+            result = await search_tool.execute(query=query, max_results=5)
+            if not result.success:
+                print_error(f"Search failed: {result.error}")
+                return f"Search failed: {result.error}"
+
+            search_results = result.content
+            print_info(f"Search results length: {len(search_results)}")
+
+            # 尝试获取网页内容
+            web_fetch_tool = self.tools.get("web_fetch")
+            if web_fetch_tool:
+                import re
+                urls = re.findall(r'URL:\s*(https?://[^\s\n]+)', search_results)
+                webpage_contents = []
+
+                for url in urls[:2]:  # 只取前2个
+                    skip_patterns = ['/search?', 'bing.com/search', 'google.com/search',
+                                   'duckduckgo.com/html', 'baidu.com/s?wd=']
+                    if any(pattern in url for pattern in skip_patterns):
+                        continue
+
+                    try:
+                        fetch_result = await web_fetch_tool.execute(url=url, max_length=3000)
+                        if fetch_result.success and len(fetch_result.content) > 200:
+                            webpage_contents.append(f"=== {url} ===\n{fetch_result.content[:2000]}")
+                    except Exception:
+                        continue
+
+                if webpage_contents:
+                    final_result = f"=== Search Results ===\n{search_results}\n\n" + "\n\n".join(webpage_contents)
+                    print_info(f"Returning result with webpage content, length: {len(final_result)}")
+                    return final_result
+
+            print_info(f"Returning search results only, length: {len(search_results)}")
+            return search_results
+
+        except Exception as e:
+            print_error(f"Error in _get_search_results: {e}")
+            return f"Error: {str(e)}"
     
     async def _web_search(self, query: str) -> str:
         """网络搜索 - 使用 web 工具执行搜索和获取网页内容"""
