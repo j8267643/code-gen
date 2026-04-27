@@ -26,11 +26,16 @@ class ExecuteCommandTool(Tool):
                 "description": "Timeout in seconds (default: 30)",
                 "default": 30,
             },
+            "background": {
+                "type": "boolean",
+                "description": "Run command in background (for long-running processes like servers)",
+                "default": True,
+            },
         },
         "required": ["command"],
     }
-    
-    async def execute(self, command: str, timeout: int = 30) -> ToolResult:
+
+    async def execute(self, command: str, timeout: int = 30, background: bool = True) -> ToolResult:
         try:
             # Security check - block dangerous commands
             dangerous_commands = ['rm -rf /', 'mkfs', 'dd if=', '> /dev/sda']
@@ -42,24 +47,79 @@ class ExecuteCommandTool(Tool):
                         f"Command blocked for security: {dangerous}"
                     )
             
+            # Cross-platform command handling
+            import platform
+            is_windows = platform.system() == "Windows"
+            
+            # Detect if command is using bash syntax on Windows
+            if is_windows:
+                # Remove bash -lc prefix if present
+                if command.startswith("bash -lc '") and command.endswith("'"):
+                    command = command[10:-1]  # Remove bash -lc ' and trailing '
+                elif command.startswith("bash -c '") and command.endswith("'"):
+                    command = command[9:-1]
+                elif command.startswith("bash "):
+                    command = command[5:]
+                
+                # Convert && to ; for PowerShell (always do this on Windows)
+                if " && " in command:
+                    command = command.replace(" && ", "; ")
+                
+                # Also handle & at end (background in bash, but PowerShell uses different syntax)
+                if command.endswith(" &"):
+                    command = command[:-2]  # Remove the & for now
+            
             # Execute command
+            if background:
+                # For background processes (like servers), don't wait for completion
+                process = await asyncio.create_subprocess_shell(
+                    command,
+                    stdout=asyncio.subprocess.DEVNULL,
+                    stderr=asyncio.subprocess.DEVNULL,
+                    cwd=os.getcwd(),
+                )
+                
+                # Wait a moment and check if process is still running
+                await asyncio.sleep(0.5)
+                
+                # Check if process is still alive
+                try:
+                    # On Windows, we can use process.returncode to check if it exited
+                    if process.returncode is not None:
+                        # Process exited immediately - likely an error
+                        return ToolResult(
+                            False,
+                            "",
+                            f"Process exited immediately with code {process.returncode}. Check command syntax and path."
+                        )
+                except:
+                    pass
+                
+                # Return with process info
+                return ToolResult(
+                    True,
+                    f"Command started in background (PID: {process.pid})",
+                    ""
+                )
+
+            # For regular commands, wait for completion
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=os.getcwd(),
             )
-            
+
             try:
                 stdout, stderr = await asyncio.wait_for(
-                    process.communicate(), 
+                    process.communicate(),
                     timeout=timeout
                 )
             except asyncio.TimeoutError:
                 process.kill()
                 return ToolResult(
-                    False, 
-                    "", 
+                    False,
+                    "",
                     f"Command timed out after {timeout} seconds"
                 )
             

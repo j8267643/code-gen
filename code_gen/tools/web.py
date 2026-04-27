@@ -38,60 +38,291 @@ class DuckDuckGoSearchTool(Tool):
     
     async def execute(self, query: str, max_results: int = 10) -> ToolResult:
         try:
-            # DuckDuckGo HTML search
-            encoded_query = quote(query)
-            url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+            # 使用多个搜索引擎，一个失败时尝试下一个
+            search_errors = []
             
-            headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
+            # 尝试 1: DuckDuckGo
+            try:
+                result = await self._search_duckduckgo(query, max_results)
+                if result.success:
+                    return result
+            except Exception as e:
+                search_errors.append(f"DuckDuckGo: {e}")
             
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
+            # 尝试 2: 百度搜索
+            try:
+                result = await self._search_baidu(query, max_results)
+                if result.success:
+                    return result
+            except Exception as e:
+                search_errors.append(f"Baidu: {e}")
+            
+            # 尝试 3: Bing
+            try:
+                result = await self._search_bing(query, max_results)
+                if result.success:
+                    return result
+            except Exception as e:
+                search_errors.append(f"Bing: {e}")
+            
+            # 都失败了
+            return ToolResult(
+                success=False,
+                content="",
+                error=f"All search engines failed: {'; '.join(search_errors)}"
+            )
+            
+        except Exception as e:
+            return ToolResult(
+                success=False,
+                content="",
+                error=f"Search failed: {str(e)}"
+            )
+    
+    async def _search_duckduckgo(self, query: str, max_results: int) -> ToolResult:
+        """使用 DuckDuckGo 搜索"""
+        encoded_query = quote(query)
+        url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            results = []
+            
+            for result in soup.find_all('div', class_='result')[:max_results]:
+                title_elem = result.find('a', class_='result__a')
+                snippet_elem = result.find('a', class_='result__snippet')
                 
-                soup = BeautifulSoup(response.text, 'html.parser')
-                results = []
-                
-                # Parse search results
-                for result in soup.find_all('div', class_='result')[:max_results]:
-                    title_elem = result.find('a', class_='result__a')
-                    snippet_elem = result.find('a', class_='result__snippet')
+                if title_elem and snippet_elem:
+                    title = title_elem.get_text(strip=True)
+                    url = title_elem.get('href', '')
+                    snippet = snippet_elem.get_text(strip=True)
                     
-                    if title_elem and snippet_elem:
+                    results.append({
+                        "title": title,
+                        "url": url,
+                        "snippet": snippet
+                    })
+            
+            if not results:
+                return ToolResult(success=False, content="", error="No results")
+            
+            formatted = []
+            for i, r in enumerate(results, 1):
+                formatted.append(f"{i}. {r['title']}\n   URL: {r['url']}\n   {r['snippet']}\n")
+            
+            return ToolResult(
+                success=True,
+                content=f"Search results for '{query}':\n\n" + "\n".join(formatted),
+                data={"results": results, "query": query}
+            )
+    
+    async def _search_bing(self, query: str, max_results: int) -> ToolResult:
+        """使用 Bing 搜索"""
+        encoded_query = quote(query)
+        url = f"https://www.bing.com/search?q={encoded_query}"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            results = []
+            
+            # 尝试多种可能的选择器
+            # 方法1: 标准 b_algo
+            for result in soup.find_all('li', class_='b_algo')[:max_results]:
+                title_elem = result.find('h2')
+                link_elem = title_elem.find('a') if title_elem else None
+                # 尝试多种 snippet 选择器
+                snippet_elem = result.find('p') or result.find('div', class_='b_caption') or result.find('span', class_='snippet')
+                
+                if link_elem:
+                    title = link_elem.get_text(strip=True)
+                    url = link_elem.get('href', '')
+                    snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                    
+                    # 过滤掉不相关的结果
+                    if title and not any(x in title.lower() for x in ['bing homepage quiz', 'bing quiz', '测验']):
+                        results.append({
+                            "title": title,
+                            "url": url,
+                            "snippet": snippet
+                        })
+            
+            # 方法2: 如果没有结果，尝试其他选择器
+            if not results:
+                for result in soup.find_all('div', class_='g')[:max_results]:
+                    title_elem = result.find('h3')
+                    link_elem = result.find('a')
+                    snippet_elem = result.find('span', class_='st') or result.find('div', class_='s')
+                    
+                    if title_elem and link_elem:
                         title = title_elem.get_text(strip=True)
-                        url = title_elem.get('href', '')
-                        snippet = snippet_elem.get_text(strip=True)
+                        url = link_elem.get('href', '')
+                        snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                        
+                        if title and not any(x in title.lower() for x in ['bing homepage quiz', 'bing quiz', '测验']):
+                            results.append({
+                                "title": title,
+                                "url": url,
+                                "snippet": snippet
+                            })
+            
+            if not results:
+                return ToolResult(success=False, content="", error="No results found")
+            
+            formatted = []
+            for i, r in enumerate(results[:max_results], 1):
+                formatted.append(f"{i}. {r['title']}\n   URL: {r['url']}\n   {r['snippet'][:200]}...\n")
+            
+            return ToolResult(
+                success=True,
+                content=f"Search results for '{query}':\n\n" + "\n".join(formatted),
+                data={"results": results, "query": query}
+            )
+    
+    async def _search_baidu(self, query: str, max_results: int) -> ToolResult:
+        """使用百度搜索"""
+        encoded_query = quote(query)
+        url = f"https://www.baidu.com/s?wd={encoded_query}"
+        
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "zh-CN,zh;q=0.9",
+            "Referer": "https://www.baidu.com/",
+        }
+        
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            response = await client.get(url, headers=headers)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            results = []
+            
+            # 百度搜索结果选择器
+            # 结果通常在 div 容器中
+            for result in soup.find_all('div', class_=lambda x: x and ('result' in x or 'c-container' in x))[:max_results]:
+                # 标题
+                title_elem = result.find('h3') or result.find('a', class_=lambda x: x and 'title' in x)
+                if not title_elem:
+                    title_elem = result.find('a')
+                
+                # 链接
+                link_elem = result.find('a')
+                
+                # 摘要 - 尝试多种选择器
+                snippet_elem = (result.find('span', class_='content-right_8Zs40') or 
+                               result.find('div', class_=lambda x: x and 'abstract' in x) or
+                               result.find('span', class_=lambda x: x and 'content' in x) or
+                               result.find('p'))
+                
+                if title_elem and link_elem:
+                    title = title_elem.get_text(strip=True)
+                    url = link_elem.get('href', '')
+                    snippet = snippet_elem.get_text(strip=True) if snippet_elem else ""
+                    
+                    # 清理标题和 URL
+                    if title and url and not url.startswith('javascript:'):
+                        # 确保 URL 是完整的
+                        if url.startswith('/'):
+                            url = f"https://www.baidu.com{url}"
                         
                         results.append({
                             "title": title,
                             "url": url,
                             "snippet": snippet
                         })
+            
+            if not results:
+                return ToolResult(success=False, content="", error="No results found")
+            
+            formatted = []
+            for i, r in enumerate(results[:max_results], 1):
+                snippet_text = r['snippet'][:200] if r['snippet'] else ""
+                formatted.append(f"{i}. {r['title']}\n   URL: {r['url']}\n   {snippet_text}...\n")
+            
+            return ToolResult(
+                success=True,
+                content=f"Search results for '{query}':\n\n" + "\n".join(formatted),
+                data={"results": results, "query": query}
+            )
+
+
+class WebFetchTool(Tool):
+    """Fetch and extract content from a webpage"""
+    
+    name = "web_fetch"
+    description = "Fetch content from a specific URL and extract text. Use this to visit websites and get detailed information."
+    input_schema = {
+        "type": "object",
+        "properties": {
+            "url": {
+                "type": "string",
+                "description": "The URL to fetch",
+            },
+            "max_length": {
+                "type": "integer",
+                "description": "Maximum length of content to return",
+                "default": 5000,
+            },
+        },
+        "required": ["url"],
+    }
+    
+    async def execute(self, url: str, max_length: int = 5000) -> ToolResult:
+        try:
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+            }
+            
+            async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
                 
-                if not results:
-                    return ToolResult(
-                        success=False,
-                        content="",
-                        error="No search results found"
-                    )
+                soup = BeautifulSoup(response.text, 'html.parser')
                 
-                # Format results
-                formatted = []
-                for i, r in enumerate(results, 1):
-                    formatted.append(f"{i}. {r['title']}\n   URL: {r['url']}\n   {r['snippet']}\n")
+                # 移除脚本和样式
+                for script in soup(["script", "style", "nav", "footer", "header"]):
+                    script.decompose()
+                
+                # 获取文本
+                text = soup.get_text(separator='\n', strip=True)
+                
+                # 清理空白行
+                lines = [line.strip() for line in text.split('\n') if line.strip()]
+                text = '\n'.join(lines)
+                
+                # 限制长度
+                if len(text) > max_length:
+                    text = text[:max_length] + "..."
                 
                 return ToolResult(
                     success=True,
-                    content=f"Search results for '{query}':\n\n" + "\n".join(formatted),
-                    data={"results": results, "query": query}
+                    content=f"Content from {url}:\n\n{text}",
+                    data={"url": url, "content": text}
                 )
                 
         except Exception as e:
             return ToolResult(
                 success=False,
                 content="",
-                error=f"Search failed: {str(e)}"
+                error=f"Failed to fetch {url}: {str(e)}"
             )
 
 

@@ -121,9 +121,9 @@ eval(user_input)  # 危险！
     if not result.success:
         print(f"  错误: {result.error}")
     
-    # 包含敏感信息
+    # 包含敏感信息（示例中的假key）
     sensitive_code = """
-api_key = "sk-abcdefghijklmnopqrstuvwxyz1234567890ABCDEF"
+api_key = "sk-example-fake-key-do-not-use"
 """
     print("\n测试2: 包含敏感信息的代码")
     print(f"  代码:\n{sensitive_code}")

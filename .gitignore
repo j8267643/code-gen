@@ -45,3 +45,12 @@ memories/
 # Code Gen local data
 .code_gen/
 .agent/
+
+# Sensitive configuration files
+.env
+.env.local
+.env.*.local
+*.key
+*.pem
+secrets.yaml
+secrets.json

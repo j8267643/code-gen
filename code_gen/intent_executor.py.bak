@@ -1,0 +1,446 @@
+"""
+Smart Intent Executor - Like Trae Agent
+Automatically detects user intent and executes tools without waiting for AI decision
+"""
+import asyncio
+import os
+import re
+from pathlib import Path
+from typing import Optional, Dict, Any, List, Callable
+from dataclasses import dataclass
+from rich.console import Console
+from rich.live import Live
+from rich.spinner import Spinner
+from rich.text import Text
+
+console = Console()
+
+
+@dataclass
+class Intent:
+    """Detected user intent"""
+    type: str  # 'run_project', 'read_file', 'write_file', 'execute_command', etc.
+    confidence: float  # 0.0 - 1.0
+    params: Dict[str, Any]
+    description: str
+
+
+class IntentRecognizer:
+    """Recognize user intent from natural language"""
+    
+    # Intent patterns with confidence scores
+    PATTERNS = {
+        'stop_project': {
+            'patterns': [
+                r'停止.*项目',
+                r'停止.*运行',
+                r'关闭.*项目',
+                r'关闭.*服务',
+                r'停止.*服务',
+                r'stop.*project',
+                r'kill.*process',
+                r'终止.*进程',
+            ],
+            'confidence': 0.95,
+        },
+        'run_project': {
+            'patterns': [
+                r'运行.*项目',
+                r'启动.*项目',
+                r'帮我运行',
+                r'run.*project',
+                r'start.*project',
+                r'启动.*服务',
+                r'运行.*程序',
+            ],
+            'confidence': 0.95,
+        },
+        'read_file': {
+            'patterns': [
+                r'读取.*文件',
+                r'查看.*文件',
+                r'打开.*文件',
+                r'read.*file',
+                r'show.*file',
+                r'看看.*文件',
+                r'cat\s+',
+            ],
+            'confidence': 0.9,
+        },
+        'write_file': {
+            'patterns': [
+                r'创建.*文件',
+                r'写入.*文件',
+                r'修改.*文件',
+                r'write.*file',
+                r'create.*file',
+                r'生成.*文件',
+            ],
+            'confidence': 0.9,
+        },
+        'list_directory': {
+            'patterns': [
+                r'列出.*目录',
+                r'查看.*目录',
+                r'显示.*文件',
+                r'list.*directory',
+                r'ls\s+',
+                r'dir\s+',
+                r'看看.*目录',
+                r'有什么文件',
+            ],
+            'confidence': 0.85,
+        },
+        'execute_command': {
+            'patterns': [
+                r'执行.*命令',
+                r'运行.*命令',
+                r'执行.*脚本',
+                r'execute.*command',
+                r'run.*command',
+                r'npm\s+',
+                r'pip\s+',
+                r'python\s+',
+                r'git\s+',
+            ],
+            'confidence': 0.85,
+        },
+        'search_files': {
+            'patterns': [
+                r'搜索',
+                r'查找',
+                r'search',
+                r'find',
+                r'grep\s+',
+                r'哪里.*定义',
+            ],
+            'confidence': 0.85,
+        },
+        'install_dependencies': {
+            'patterns': [
+                r'安装.*依赖',
+                r'install.*dependencies',
+                r'pip\s+install',
+                r'npm\s+install',
+                r'yarn\s+install',
+            ],
+            'confidence': 0.9,
+        },
+    }
+    
+    def recognize(self, user_input: str) -> Optional[Intent]:
+        """Recognize intent from user input"""
+        user_input_lower = user_input.lower()
+        
+        for intent_type, config in self.PATTERNS.items():
+            for pattern in config['patterns']:
+                if re.search(pattern, user_input_lower, re.IGNORECASE):
+                    params = self._extract_params(intent_type, user_input)
+                    return Intent(
+                        type=intent_type,
+                        confidence=config['confidence'],
+                        params=params,
+                        description=self._get_description(intent_type, params)
+                    )
+        
+        return None
+    
+    def _extract_params(self, intent_type: str, user_input: str) -> Dict[str, Any]:
+        """Extract parameters based on intent type"""
+        params = {}
+        
+        if intent_type == 'run_project':
+            # Extract project path - match D:\path\with\spaces\and\chars\123
+            # Stop at Chinese characters or end of path-like string
+            path_match = re.search(r'[Dd]:[\\/][a-zA-Z0-9_\\/\-\.]+(?:\\[a-zA-Z0-9_\-\.]+)*', user_input)
+            if path_match:
+                params['path'] = path_match.group(0)
+            else:
+                params['path'] = os.getcwd()
+                
+        elif intent_type == 'read_file':
+            # Extract file path
+            path_match = re.search(r'[Dd]:[\\/][a-zA-Z0-9_\\/\-\.]+(?:\\[a-zA-Z0-9_\-\.]+)*', user_input)
+            if path_match:
+                params['path'] = path_match.group(0)
+            else:
+                # Try to find filename
+                file_match = re.search(r'(?:文件|file)\s+["\']?([^"\'\s]+)["\']?', user_input, re.IGNORECASE)
+                if file_match:
+                    params['path'] = file_match.group(1)
+                    
+        elif intent_type == 'list_directory':
+            # Extract directory path
+            path_match = re.search(r'[Dd]:[\\/][a-zA-Z0-9_\\/\-\.]+(?:\\[a-zA-Z0-9_\-\.]+)*', user_input)
+            if path_match:
+                params['path'] = path_match.group(0)
+            else:
+                params['path'] = '.'
+                
+        elif intent_type == 'execute_command':
+            # Extract command
+            cmd_match = re.search(r'(?:执行|运行|execute|run)\s+["\']?([^"\']+)["\']?', user_input, re.IGNORECASE)
+            if cmd_match:
+                params['command'] = cmd_match.group(1)
+                
+        elif intent_type == 'search_files':
+            # Extract search pattern
+            pattern_match = re.search(r'(?:搜索|查找|search|find)\s+["\']?([^"\']+)["\']?', user_input, re.IGNORECASE)
+            if pattern_match:
+                params['pattern'] = pattern_match.group(1)
+                
+        return params
+    
+    def _get_description(self, intent_type: str, params: Dict[str, Any]) -> str:
+        """Get human-readable description"""
+        descriptions = {
+            'stop_project': f"Stop project at {params.get('path', 'current directory')}",
+            'run_project': f"Run project at {params.get('path', 'current directory')}",
+            'read_file': f"Read file {params.get('path', '')}",
+            'write_file': f"Write to file {params.get('path', '')}",
+            'list_directory': f"List directory {params.get('path', '')}",
+            'execute_command': f"Execute command: {params.get('command', '')}",
+            'search_files': f"Search for: {params.get('pattern', '')}",
+            'install_dependencies': "Install dependencies",
+        }
+        return descriptions.get(intent_type, f"Execute {intent_type}")
+
+
+class SmartExecutor:
+    """Smart executor like Trae Agent - auto-detect and execute"""
+    
+    def __init__(self, tools: List):
+        self.tools = {tool.name: tool for tool in tools}
+        self.intent_recognizer = IntentRecognizer()
+        self.execution_history: List[Dict] = []
+        
+    async def execute(self, user_input: str) -> Optional[str]:
+        """
+        Main entry: detect intent and execute
+        Returns result string if executed, None if no intent detected
+        """
+        # Recognize intent
+        intent = self.intent_recognizer.recognize(user_input)
+        
+        if not intent or intent.confidence < 0.8:
+            return None  # Let AI handle it
+            
+        # Execute based on intent
+        console.print(f"[dim]Detected intent: {intent.description}[/dim]")
+        
+        if intent.type == 'stop_project':
+            return await self._execute_stop_project(intent.params)
+        elif intent.type == 'run_project':
+            return await self._execute_run_project(intent.params)
+        elif intent.type == 'read_file':
+            return await self._execute_read_file(intent.params)
+        elif intent.type == 'list_directory':
+            return await self._execute_list_directory(intent.params)
+        elif intent.type == 'execute_command':
+            return await self._execute_command(intent.params)
+        elif intent.type == 'search_files':
+            return await self._execute_search(intent.params)
+        elif intent.type == 'install_dependencies':
+            return await self._execute_install(intent.params, user_input)
+            
+        return None
+    
+    async def _execute_run_project(self, params: Dict[str, Any]) -> str:
+        """Execute run project - simplified like Trae Agent"""
+        import os
+        import subprocess
+        
+        project_path = params.get('path', os.getcwd())
+        os.chdir(project_path)
+        
+        results = []
+        
+        # Check for backend
+        backend_path = os.path.join(project_path, 'backend')
+        if os.path.exists(backend_path):
+            console.print("[bold blue]🚀 Starting backend...[/bold blue]")
+            
+            # Find main.py or app.py
+            main_file = None
+            for f in ['main.py', 'app.py']:
+                if os.path.exists(os.path.join(backend_path, f)):
+                    main_file = f
+                    break
+            
+            if main_file:
+                cmd = f'python -m uvicorn backend.{main_file[:-3]}:app --reload --port 8000'
+                subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                console.print(f"[green]✓[/green] Backend running on http://localhost:8000")
+                results.append("Backend: http://localhost:8000")
+                await asyncio.sleep(1)
+        
+        # Check for frontend
+        frontend_path = os.path.join(project_path, 'frontend')
+        if os.path.exists(frontend_path):
+            console.print("[bold blue]🚀 Starting frontend...[/bold blue]")
+            
+            # Check for index.html
+            if os.path.exists(os.path.join(frontend_path, 'index.html')):
+                cmd = 'python -m http.server 8080 --directory frontend'
+                subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                console.print(f"[green]✓[/green] Frontend running on http://localhost:8080")
+                results.append("Frontend: http://localhost:8080")
+                await asyncio.sleep(1)
+        
+        # Check for run_all.bat
+        run_all_path = os.path.join(project_path, 'run_all.bat')
+        if os.path.exists(run_all_path) and not results:
+            console.print("[bold blue]🚀 Running start script...[/bold blue]")
+            subprocess.Popen(run_all_path, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            console.print(f"[green]✓[/green] Project started")
+            results.append("Project started via run_all.bat")
+        
+        if results:
+            console.print("\n[bold green]✅ Project is running![/bold green]")
+            return "\n".join(results)
+        else:
+            return "⚠️ No runnable components detected"
+    
+    async def _execute_stop_project(self, params: Dict[str, Any]) -> str:
+        """Execute stop project - kill processes on common ports"""
+        import os
+        import subprocess
+        
+        project_path = params.get('path', os.getcwd())
+        
+        stopped = []
+        
+        # Common ports to check
+        ports = [8000, 8080, 3000, 5000, 5173]
+        
+        for port in ports:
+            console.print(f"[dim]Checking port {port}...[/dim]")
+            # Find process using port
+            try:
+                # Use netstat to find PID
+                result = subprocess.run(
+                    f'netstat -ano | findstr :{port}',
+                    shell=True,
+                    capture_output=True,
+                    text=True
+                )
+                if result.stdout:
+                    # Extract PID (last column)
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines:
+                        parts = line.strip().split()
+                        if len(parts) >= 5:
+                            pid = parts[-1]
+                            # Kill the process
+                            subprocess.run(f'taskkill /PID {pid} /F', shell=True, capture_output=True)
+                            console.print(f"[green]✓[/green] Stopped process on port {port} (PID: {pid})")
+                            stopped.append(f"Port {port}")
+                            break
+            except Exception as e:
+                console.print(f"[dim]Could not check port {port}: {e}[/dim]")
+        
+        if stopped:
+            console.print("\n[bold yellow]🛑 Project stopped[/bold yellow]")
+            return f"Stopped: {', '.join(stopped)}"
+        else:
+            return "ℹ️ No running processes found"
+    
+    async def _execute_read_file(self, params: Dict[str, Any]) -> str:
+        """Execute read file intent"""
+        path = params.get('path', '')
+        if not path:
+            return "❌ No file path specified"
+            
+        tool = self.tools.get('read_file')
+        if not tool:
+            return "❌ read_file tool not available"
+            
+        console.print(f"[dim]Reading file: {path}[/dim]")
+        result = await tool.execute(path=path)
+        
+        if result.success:
+            return f"✅ File content:\n```\n{result.content}\n```"
+        else:
+            return f"❌ Error: {result.error}"
+    
+    async def _execute_list_directory(self, params: Dict[str, Any]) -> str:
+        """Execute list directory intent"""
+        path = params.get('path', '.')
+        
+        tool = self.tools.get('list_directory')
+        if not tool:
+            return "❌ list_directory tool not available"
+            
+        console.print(f"[dim]Listing directory: {path}[/dim]")
+        result = await tool.execute(path=path)
+        
+        if result.success:
+            return f"✅ Directory contents:\n{result.content}"
+        else:
+            return f"❌ Error: {result.error}"
+    
+    async def _execute_command(self, params: Dict[str, Any]) -> str:
+        """Execute command intent"""
+        command = params.get('command', '')
+        if not command:
+            return "❌ No command specified"
+            
+        tool = self.tools.get('execute_command') or self.tools.get('bash')
+        if not tool:
+            return "❌ Command execution tool not available"
+            
+        console.print(f"[dim]Executing: {command}[/dim]")
+        result = await tool.execute(command=command)
+        
+        if result.success:
+            return f"✅ Command output:\n{result.content}"
+        else:
+            return f"❌ Error: {result.error}"
+    
+    async def _execute_search(self, params: Dict[str, Any]) -> str:
+        """Execute search intent"""
+        pattern = params.get('pattern', '')
+        if not pattern:
+            return "❌ No search pattern specified"
+            
+        tool = self.tools.get('search_files') or self.tools.get('grep')
+        if not tool:
+            return "❌ Search tool not available"
+            
+        console.print(f"[dim]Searching for: {pattern}[/dim]")
+        result = await tool.execute(pattern=pattern)
+        
+        if result.success:
+            return f"✅ Search results:\n{result.content}"
+        else:
+            return f"❌ Error: {result.error}"
+    
+    async def _execute_install(self, params: Dict[str, Any], user_input: str) -> str:
+        """Execute install dependencies intent"""
+        # Detect package manager from user input
+        if 'pip' in user_input.lower():
+            command = "pip install -r requirements.txt"
+        elif 'npm' in user_input.lower():
+            command = "npm install"
+        elif 'yarn' in user_input.lower():
+            command = "yarn install"
+        else:
+            # Auto-detect
+            if os.path.exists('requirements.txt'):
+                command = "pip install -r requirements.txt"
+            elif os.path.exists('package.json'):
+                command = "npm install"
+            else:
+                return "❌ No dependency file found (requirements.txt or package.json)"
+        
+        tool = self.tools.get('execute_command') or self.tools.get('bash')
+        if not tool:
+            return "❌ Command execution tool not available"
+            
+        console.print(f"[bold blue]📦 Installing dependencies...[/bold blue]")
+        result = await tool.execute(command=command)
+        
+        if result.success:
+            return f"✅ Dependencies installed successfully\n{result.content}"
+        else:
+            return f"❌ Installation failed: {result.error}"

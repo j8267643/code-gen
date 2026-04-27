@@ -10,7 +10,7 @@ import asyncio
 
 from code_gen.agents.unified_agent import UnifiedAgent, UnifiedAgentConfig
 from code_gen.agents.agent import Agent, AgentRole
-from code_gen.agents.memory import MemorySystem
+from code_gen.agents.memory import AgentMemory
 from code_gen.agents.git_integration import GitIntegration, GitConfig
 from code_gen.client import AIClient
 

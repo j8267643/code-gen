@@ -1,7 +1,7 @@
 """
-AutoDev Executor - 自主开发执行器
+Ralph Executor - Ralph 执行器
 
-执行自主开发循环的核心逻辑
+执行 Ralph 循环的核心逻辑
 """
 from typing import Dict, Any, List, Optional, Callable
 from pathlib import Path
@@ -26,9 +26,9 @@ class ExecutionContext:
     start_time: datetime = field(default_factory=datetime.now)
 
 
-class AutoDevExecutor:
+class RalphExecutor:
     """
-    自主开发执行器
+    Ralph 执行器
     
     负责执行单个用户故事的完整流程
     """
@@ -298,16 +298,16 @@ class AutoDevExecutor:
             print(f"⚠️  Git 操作失败: {e}")
 
 
-class AutoDevLoop:
+class RalphLoop:
     """
-    自主开发执行循环
+    Ralph 执行循环
     
     管理多个用户故事的连续执行
     """
     
     def __init__(
         self,
-        executor: AutoDevExecutor,
+        executor: RalphExecutor,
         max_iterations: int = 100,
         stop_on_error: bool = False
     ):
@@ -340,7 +340,7 @@ class AutoDevLoop:
     
     async def run(self) -> Dict[str, Any]:
         """运行执行循环"""
-        print(f"\n🚀 自主开发执行循环开始")
+        print(f"\n🚀 Ralph 执行循环开始")
         print(f"📋 总故事数: {len(self.stories)}")
         print(f"⏹️  停止条件: {'错误时停止' if self.stop_on_error else '忽略错误'}")
         

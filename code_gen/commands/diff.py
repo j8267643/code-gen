@@ -7,7 +7,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.syntax import Syntax
 
-from code_gen.client import AIClient
+from code_gen.client import ClaudeClient
 
 console = Console()
 
@@ -68,4 +68,4 @@ Summarize:
 
 
 # Fix import
-from code_gen.client import AIClient as Client
+from code_gen.client import ClaudeClient as Client

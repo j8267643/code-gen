@@ -76,7 +76,7 @@ class DynamicWorkflow:
         self.work_dir = work_dir
         self.executor = executor
         self.plan: Optional[ExecutionPlan] = None
-        self.execution_history: List[Dict] = []
+        self.execution_history: List[Dict] = field(default_factory=list)
         self.team: Optional[AgentTeam] = None
     
     async def run(self) -> TeamResult:
@@ -93,7 +93,6 @@ class DynamicWorkflow:
         print(f"{'='*60}")
         print(f"目标: {self.config.goal}")
         print(f"策略: {self.config.strategy}")
-        print(f"模型: {getattr(self.executor, 'model', 'default')}")
         print(f"\n")
         
         # 阶段 1: 规划
@@ -123,119 +122,84 @@ class DynamicWorkflow:
         print("\n🚀 阶段 2: 执行计划...")
         result = await self._execute_plan()
         
-        # 保存结果到文件
-        self._save_results(result)
-        
         # 阶段 3: 总结
         print("\n📊 阶段 3: 执行总结...")
         self._display_summary(result)
         
         return result
     
-    def _save_results(self, result: TeamResult):
-        """保存执行结果到文件"""
-        import json
-        from datetime import datetime
-        
-        # 创建结果目录
-        results_dir = self.work_dir / ".workflow_results"
-        results_dir.mkdir(exist_ok=True)
-        
-        # 生成文件名
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        result_file = results_dir / f"{self.config.name}_{timestamp}.json"
-        
-        # 准备结果数据
-        result_data = {
-            "workflow": self.config.name,
-            "goal": self.config.goal,
-            "success": result.success,
-            "stats": {
-                "tasks_completed": result.tasks_completed,
-                "tasks_failed": result.tasks_failed,
-                "total_time": result.total_time
-            },
-            "plan": {
-                "reasoning": self.plan.reasoning if self.plan else "",
-                "steps": [
-                    {
-                        "name": s.get("name", ""),
-                        "description": s.get("description", ""),
-                        "agent_role": s.get("agent_role", ""),
-                        "depends_on": s.get("depends_on", [])
-                    }
-                    for s in (self.plan.steps if self.plan else [])
-                ]
-            },
-            "outputs": result.outputs,
-            "errors": result.errors,
-            "execution_history": self.executor.get_history() if hasattr(self.executor, 'get_history') else []
-        }
-        
-        # 保存到文件
-        with open(result_file, 'w', encoding='utf-8') as f:
-            json.dump(result_data, f, ensure_ascii=False, indent=2)
-        
-        print(f"\n💾 结果已保存到: {result_file}")
-        
-        # 如果有执行历史，也保存详细日志
-        if hasattr(self.executor, 'get_history') and self.executor.get_history():
-            log_file = results_dir / f"{self.config.name}_{timestamp}_log.txt"
-            with open(log_file, 'w', encoding='utf-8') as f:
-                f.write(f"工作流: {self.config.name}\n")
-                f.write(f"目标: {self.config.goal}\n")
-                f.write(f"=" * 60 + "\n\n")
-                
-                for i, entry in enumerate(self.executor.get_history(), 1):
-                    f.write(f"--- 步骤 {i} ---\n")
-                    f.write(f"Agent: {entry.get('agent', 'unknown')}\n")
-                    f.write(f"Prompt: {entry.get('prompt', '')}\n")
-                    f.write(f"Output: {entry.get('output', '')}\n")
-                    f.write(f"Success: {entry.get('success', False)}\n")
-                    f.write("\n")
-            
-            print(f"📝 执行日志已保存到: {log_file}")
-    
     async def _create_plan(self) -> ExecutionPlan:
         """
         创建执行计划
         
-        使用 AI 分析目标并制定计划
+        使用 Orchestrator Agent 分析目标并制定计划
         """
-        # 检查是否使用真实执行器
-        if hasattr(self.executor, 'generate_plan'):
-            # 使用真实 AI 生成计划
-            print("🤖 调用 AI 制定计划...")
-            
-            available_agents = [
-                {
-                    "name": data.get("name", aid),
-                    "role": data.get("role", "assistant"),
-                    "goal": data.get("goal", "")
-                }
-                for aid, data in self.config.agents.items()
-            ]
-            
-            plan_result = await self.executor.generate_plan(
-                goal=self.config.goal,
-                input_text=self.config.input,
-                available_agents=available_agents,
-                strategy=self.config.strategy
-            )
-            
-            if plan_result.get("success"):
-                return ExecutionPlan(
-                    reasoning=plan_result.get("reasoning", ""),
-                    estimated_time=plan_result.get("estimated_time", 30),
-                    steps=plan_result.get("steps", [])
-                )
-            else:
-                print(f"⚠️ AI 规划失败: {plan_result.get('error', '未知错误')}")
-                print("🔄 使用默认计划...")
-                return self._generate_mock_plan()
+        # 创建规划 Agent
+        planner = Agent(
+            name="规划师",
+            role=AgentRole.ORCHESTRATOR,
+            goal="制定最优执行计划",
+            instructions="""你是一个任务规划专家。
+
+请分析给定的目标，制定详细的执行计划。
+
+你需要：
+1. 分析目标需要哪些步骤
+2. 为每个步骤分配合适的 Agent 角色
+3. 确定步骤之间的依赖关系
+4. 估算执行时间
+
+可用 Agent 角色：
+- researcher: 研究员，收集和分析信息
+- architect: 架构师，系统设计
+- builder: 开发者，代码实现
+- validator: 验证者，代码检查
+- tester: 测试者，功能测试
+- scribe: 文档员，文档编写
+
+请以 JSON 格式返回计划：
+{
+    "reasoning": "规划思路...",
+    "estimated_time": 30,
+    "steps": [
+        {
+            "id": "step_1",
+            "name": "步骤名称",
+            "description": "步骤描述",
+            "agent_role": "researcher",
+            "estimated_minutes": 10,
+            "depends_on": []
+        }
+    ]
+}""",
+            model="ollama/qwen2.5"
+        )
         
-        # 否则使用模拟计划
-        return self._generate_mock_plan()
+        # 构建规划提示
+        agents_info = "\n".join([
+            f"- {aid}: {adata.get('role', 'unknown')} - {adata.get('goal', '')}"
+            for aid, adata in self.config.agents.items()
+        ])
+        
+        tools_info = "\n".join([f"- {tool}" for tool in self.config.tools]) if self.config.tools else "无"
+        
+        prompt = f"""请为以下目标制定执行计划：
+
+目标: {self.config.goal}
+输入: {self.config.input}
+描述: {self.config.description}
+
+可用 Agents:
+{agents_info}
+
+可用工具:
+{tools_info}
+
+约束条件:
+- 最大迭代次数: {self.config.max_iterations}
+- 策略: {self.config.strategy}
+
+请制定一个详细的执行计划。"""
 
         # 调用 AI 制定计划
         messages = [

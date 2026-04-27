@@ -247,7 +247,26 @@ class Tool(ABC):
         return {
             "name": self.name,
             "description": self.description,
-            "input_schema": self.input_schema,
+            "input_schema": {
+                "type": "object",
+                "properties": self.input_schema.get("properties", {}),
+                "required": self.input_schema.get("required", []),
+            },
+        }
+    
+    def to_openai_format(self) -> dict:
+        """Convert to OpenAI API tool format"""
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": {
+                    "type": "object",
+                    "properties": self.input_schema.get("properties", {}),
+                    "required": self.input_schema.get("required", []),
+                },
+            }
         }
     
     async def execute_with_permissions(self, **kwargs) -> ToolResult:

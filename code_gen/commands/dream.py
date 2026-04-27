@@ -12,7 +12,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 
 from code_gen.config import settings
 from code_gen.memory import MemorySystem, MemoryType
-from code_gen.client import AIClient
+from code_gen.client import ClaudeClient
 
 console = Console()
 
@@ -52,7 +52,7 @@ async def dream(
     
     # Initialize client
     try:
-        client = AIClient()
+        client = ClaudeClient()
     except Exception as e:
         console.print(f"[red]Failed to initialize client: {e}[/red]")
         return
@@ -92,7 +92,7 @@ async def dream(
 
 
 async def _run_dream_process(
-    client: AIClient,
+    client: ClaudeClient,
     memory_system: MemorySystem,
     verbose: bool = False
 ) -> str:

@@ -7,7 +7,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.prompt import Confirm
 
-from code_gen.client import AIClient
+from code_gen.client import ClaudeClient
 
 console = Console()
 
@@ -64,7 +64,7 @@ async def commit_changes(message: str = None, auto: bool = False):
         
         # Generate commit message if not provided
         if not message:
-            client = AIClient()
+            client = ClaudeClient()
             
             prompt = f"""Generate a concise git commit message for these changes.
 Follow conventional commits format (type: description).

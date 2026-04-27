@@ -7,7 +7,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.syntax import Syntax
 
-from code_gen.client import AIClient
+from code_gen.client import ClaudeClient
 
 console = Console()
 
@@ -15,7 +15,7 @@ console = Console()
 async def review_files(files: list[Path], model: str):
     """Review code files"""
     try:
-        client = AIClient()
+        client = ClaudeClient()
         
         console.print(Panel.fit(
             "[bold blue]Code Review[/bold blue]",

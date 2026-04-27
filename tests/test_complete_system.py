@@ -1,5 +1,3 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
 完整系统测试脚本
 测试 Code Gen 项目的所有功能模块
@@ -7,14 +5,8 @@
 import asyncio
 import sys
 import os
-import io
 from pathlib import Path
 from datetime import datetime
-
-# 强制 UTF-8 编码
-if sys.platform == 'win32':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -48,7 +40,7 @@ class SystemTestRunner:
     async def run_all_tests(self):
         """运行所有测试"""
         print("\n" + "="*70)
-        print("CODE GEN 完整系统测试")
+        print("🚀 CODE GEN 完整系统测试")
         print("="*70)
         print(f"测试时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"工作目录: {self.work_dir}")
@@ -95,7 +87,7 @@ class SystemTestRunner:
     async def test_context_management(self):
         """测试上下文管理"""
         print("\n" + "-"*70)
-        print("2. 上下文管理系统测试")
+        print("🧠 2. 上下文管理系统测试")
         print("-"*70)
         
         try:
@@ -138,7 +130,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_file_operations(self):
         """测试文件操作"""
         print("\n" + "-"*70)
-        print("3. 文件操作系统测试")
+        print("📁 3. 文件操作系统测试")
         print("-"*70)
         
         try:
@@ -195,7 +187,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_parallel_execution(self):
         """测试并行执行"""
         print("\n" + "-"*70)
-        print("4. 并行执行系统测试")
+        print("⚡ 4. 并行执行系统测试")
         print("-"*70)
         
         try:
@@ -236,7 +228,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_error_recovery(self):
         """测试错误恢复"""
         print("\n" + "-"*70)
-        print("️  5. 错误恢复系统测试")
+        print("🛡️  5. 错误恢复系统测试")
         print("-"*70)
         
         try:
@@ -291,7 +283,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_memory_system(self):
         """测试记忆系统"""
         print("\n" + "-"*70)
-        print("6. 记忆系统测试")
+        print("💾 6. 记忆系统测试")
         print("-"*70)
         
         try:
@@ -324,7 +316,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_history_tracking(self):
         """测试历史追踪"""
         print("\n" + "-"*70)
-        print("7. 历史追踪系统测试")
+        print("📜 7. 历史追踪系统测试")
         print("-"*70)
         
         try:
@@ -359,7 +351,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_security_system(self):
         """测试安全系统"""
         print("\n" + "-"*70)
-        print("8. 安全系统测试")
+        print("🔒 8. 安全系统测试")
         print("-"*70)
         
         try:
@@ -387,7 +379,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_skill_system(self):
         """测试技能系统"""
         print("\n" + "-"*70)
-        print("9. 技能系统测试")
+        print("🎯 9. 技能系统测试")
         print("-"*70)
         
         try:
@@ -409,7 +401,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_cost_tracking(self):
         """测试成本追踪"""
         print("\n" + "-"*70)
-        print("10. 成本追踪系统测试")
+        print("💰 10. 成本追踪系统测试")
         print("-"*70)
         
         try:
@@ -438,7 +430,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_plugin_system(self):
         """测试插件系统"""
         print("\n" + "-"*70)
-        print("11. 插件系统测试")
+        print("🔌 11. 插件系统测试")
         print("-"*70)
         
         try:
@@ -460,7 +452,7 @@ def calculate_fibonacci(n: int) -> int:
     async def test_client_integration(self):
         """测试客户端集成"""
         print("\n" + "-"*70)
-        print("12. 客户端集成测试")
+        print("🌐 12. 客户端集成测试")
         print("-"*70)
         
         try:
@@ -482,36 +474,36 @@ def calculate_fibonacci(n: int) -> int:
     def print_summary(self):
         """打印测试总结"""
         print("\n" + "="*70)
-        print("测试总结")
+        print("📊 测试总结")
         print("="*70)
-
+        
         passed = 0
         failed = 0
-
+        
         for name, success, detail in self.results:
-            status = "[PASS]" if success else "[FAIL]"
+            status = "✅ 通过" if success else "❌ 失败"
             print(f"{status}: {name:15s} - {detail}")
             if success:
                 passed += 1
             else:
                 failed += 1
-
+        
         print("-"*70)
         print(f"总计: {passed} 通过, {failed} 失败, {len(self.results)} 项测试")
-
+        
         if failed == 0:
-            print("\n所有测试通过！系统运行正常！")
+            print("\n🎉 所有测试通过！系统运行正常！")
         else:
-            print(f"\n{failed} 项测试失败，请检查日志")
-
+            print(f"\n⚠️  {failed} 项测试失败，请检查日志")
+            
         print("="*70)
 
 
-async def test_complete_system():
-    """运行所有测试 - test_complete_system 入口"""
+async def main():
+    """主函数"""
     runner = SystemTestRunner()
     await runner.run_all_tests()
 
 
 if __name__ == "__main__":
-    asyncio.run(test_complete_system())
+    asyncio.run(main())

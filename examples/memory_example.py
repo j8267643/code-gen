@@ -220,9 +220,9 @@ async def example_6_auto_promotion():
     memory.store_short_term("普通对话内容1", importance=0.5)
     memory.store_short_term("普通对话内容2", importance=0.6)
     
-    # 高重要性 - 会自动晋升
-    memory.store_short_term("用户密码: secret123", importance=0.9)
-    memory.store_short_term("用户API密钥: sk-xxx", importance=0.95)
+    # 高重要性 - 会自动晋升（示例数据，非真实密码）
+    memory.store_short_term("用户密码: [示例密码]")
+    memory.store_short_term("用户API密钥: [示例密钥]")
     
     # 查看统计
     stats = memory.get_stats()

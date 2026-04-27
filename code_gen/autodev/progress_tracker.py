@@ -1,14 +1,13 @@
 """
 Progress Tracker - 进度跟踪器
 
-跟踪 AutoDev 执行进度
+跟踪 Ralph 执行进度，类似于 Ralph 的 progress.txt
 """
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 from dataclasses import dataclass, field
 from datetime import datetime
 import json
-import re
 
 
 @dataclass
